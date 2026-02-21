@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PromptLens — Prompt Saliency Debugger</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header>
+    <div class="logo">Prompt<span>Lens</span></div>
+    <div class="header-right">
+      <span class="badge">Saliency Debugger</span>
+      <button class="key-btn" id="keyBtn" onclick="openKeyModal()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+        <span id="keyBtnLabel">Add API Key</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- API Key Modal -->
+  <div class="modal-backdrop" id="modalBackdrop" onclick="closeKeyModal()"></div>
+  <div class="modal" id="keyModal">
+    <div class="modal-header">
+      <span>Groq API Key</span>
+      <button class="modal-close" onclick="closeKeyModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="modal-desc">
+        PromptLens uses <strong>Groq's free API</strong> (Llama 3.3 70B) to run saliency analysis.
+        Your key is stored only in your browser — never sent anywhere except Groq's servers.
+      </p>
+      <div class="modal-steps">
+        <span>1.</span> Go to <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a>
+        <br/><span>2.</span> Sign up free (no credit card needed)
+        <br/><span>3.</span> Create an API key and paste it below
+      </div>
+      <input
+        type="password"
+        id="keyInput"
+        placeholder="gsk_••••••••••••••••••••••••"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <div id="keyError" class="key-error"></div>
+      <div class="modal-actions">
+        <button class="btn-secondary" onclick="clearKey()">Clear</button>
+        <button class="btn-primary" onclick="saveKey()">Save Key</button>
+      </div>
+    </div>
+  </div>
+
+  <main>
+    <!-- Left: Input -->
+    <section class="panel input-panel">
+      <div class="panel-header">
+        <div class="dot dot-accent"></div>
+        Prompt Input
+      </div>
+      <div class="panel-body">
+        <label class="field-label" for="prompt">User Prompt</label>
+        <textarea
+          id="prompt"
+          placeholder="Enter your prompt here. Each phrase will be colour-coded by how much it shapes the model output.
+
+Example:
+You are an expert chef. Suggest three dinner recipes that are quick to make, use chicken, and are suitable for a family of four. Make sure the recipes are healthy and avoid processed ingredients."
+        ></textarea>
+
+        <label class="field-label" for="systemprompt" style="margin-top:16px;">System Prompt <span class="optional">(optional)</span></label>
+        <textarea id="systemprompt" rows="3" placeholder="Optional system-level instructions..."></textarea>
+
+        <div class="method-row">
+          <label class="field-label" style="margin:0; white-space:nowrap;">Saliency Method</label>
+          <div class="method-group">
+            <button class="method-btn active" data-method="perturbation" onclick="selectMethod(this)" title="Replaces each phrase with [...] and measures output divergence">Perturbation</button>
+            <button class="method-btn" data-method="omission" onclick="selectMethod(this)" title="Removes each phrase entirely and measures output divergence">Leave-One-Out</button>
+            <button class="method-btn" data-method="paraphrase" onclick="selectMethod(this)" title="Rewrites each phrase to be vague, then measures output divergence">Paraphrase</button>
+          </div>
+        </div>
+
+        <div id="methodDesc" class="method-desc">
+          Replaces each phrase with <code>[...]</code> and measures how much the model output changes. Fast and reliable for most prompts.
+        </div>
+
+        <div id="errorBanner" class="error-banner"></div>
+
+        <button class="run-btn" id="runBtn" onclick="runAnalysis()">
+          <span class="spinner" id="spinner"></span>
+          <span id="btnLabel">Analyze Prompt</span>
+          <span class="kbd-hint">⌘↵</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Right: Output -->
+    <section class="output-col">
+
+      <div class="panel saliency-panel">
+        <div class="panel-header">
+          <div class="dot dot-accent"></div>
+          Phrase Saliency Map
+          <span class="panel-hint" id="phraseCount"></span>
+        </div>
+        <div class="progress-wrap" id="progressWrap">
+          <div class="progress-bar" id="progressBar"></div>
+        </div>
+        <div class="phase-log" id="phaseLog"></div>
+        <div id="saliencyText" class="saliency-text">
+          <div class="empty-state">
+            <div class="empty-icon">◎</div>
+            <p>Your prompt will appear here, colour-coded by phrase importance.<br/>Red = high impact &nbsp;·&nbsp; Blue = low impact.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="legend-row">
+        <span class="legend-label">Impact</span>
+        <span class="legend-low">Low</span>
+        <div class="legend-bar"></div>
+        <span class="legend-high">High</span>
+      </div>
+
+      <div class="stats-row" id="statsRow" style="display:none;">
+        <div class="stat-card">
+          <div class="stat-label">Phrases Analyzed</div>
+          <div class="stat-value" id="statPhrases">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Most Impactful</div>
+          <div class="stat-value stat-value--sm" id="statTop">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Est. Redundancy</div>
+          <div class="stat-value" id="statRedundancy">—</div>
+        </div>
+      </div>
+
+      <div class="panel model-output-panel" id="modelOutputCard" style="display:none;">
+        <div class="panel-header">
+          <div class="dot dot-green"></div>
+          Baseline Model Output
+        </div>
+        <div id="modelResponse" class="model-response"></div>
+      </div>
+
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
