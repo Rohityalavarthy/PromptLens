@@ -122,23 +122,13 @@ promptlens/
 
 ---
 
-## Limitations worth knowing
-
-**The divergence metric is approximate.** Character trigram similarity is a proxy for semantic similarity — it's fast and requires no dependencies, but it can miss cases where the model output changes meaning without changing surface form, or flag false positives when the model uses different phrasing to say the same thing. For most prompts it works well enough to be genuinely useful.
-
-**Temperature is fixed at 0.** All API calls use `temperature: 0` to keep outputs as deterministic as possible. This matters — if outputs vary randomly between calls, saliency scores become noise. Even at temperature 0 some providers have minor non-determinism, so treat scores as directional rather than exact.
-
-**API call count scales linearly.** A prompt with 20 phrases runs 21 calls in perturbation/omission mode, 41 in paraphrase mode. On long prompts this takes time and burns through rate limit quota faster. If you're hitting limits, stick to perturbation mode and keep prompts under ~200 words.
-
----
-
-## Roadmap
+## Future Roadmap
 
 - [ ] Export saliency map as image
 - [ ] Side-by-side diff of two prompt variants
 - [ ] Batch mode — run the same analysis across multiple test inputs and aggregate scores
 - [ ] OpenAI and Anthropic key support
-- [ ] Configurable phrase granularity (word / clause / sentence)
+- [ ] Implement a better token level saliency measure which is then normalized to phrases
 
 ---
 
