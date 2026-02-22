@@ -38,7 +38,7 @@ Three methods are available:
 
 Output similarity is computed using **character trigram cosine similarity** — overlapping 3-character substrings are extracted from both outputs, frequency vectors are built, and cosine distance is computed. Saliency score = `1 - similarity`. This is language-agnostic, requires no NLP library, and is robust to surface-level paraphrasing in the model output.
 
-Chose this technique on this basis of: Smolka, A., Wang, H.-M., Chang, J. S. et al. (2022). Is Character Trigram Overlapping Ratio Still the Best for Aligning Paraphrases?
+Chose this technique on this basis of: **Smolka, A., Wang, H.-M., Chang, J. S. et al. (2022). Is Character Trigram Overlapping Ratio Still the Best for Aligning Paraphrases?**
 
 But due to the apparent limitations of this technique, I will be looking towards moving towards a better saliency measurement formula in the next iteration.
 
