@@ -4,6 +4,8 @@ A browser-based saliency debugger for prompt engineers and developers building L
 
 Built this because I kept iterating on prompts with no real signal on what was doing work and what wasn't. Most debugging is just vibes - this makes it measurable.
 
+**Run it directly at:** https://rohityalavarthy.github.io/PromptLens
+
 ---
 
 ## What it does
