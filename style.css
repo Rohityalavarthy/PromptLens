@@ -3,13 +3,13 @@
 /* ─── Tokens ──────────────────────────────────────────── */
 :root {
   --bg:             #0a0a0b;
-  --surface:        #111114;
-  --surface-raised: #161619;
+  --surface:        #212128;
+  --surface-raised: #37373c;
   --border:         #1e1e24;
   --border-bright:  #2e2e3a;
-  --text:           #e8e8f0;
-  --text-dim:       #b9b9c7;
-  --text-dimmer:    #8b8b96;
+  --text:           #ffffff;
+  --text-dim:       #d6d6de;
+  --text-dimmer:    #a4a4aa;
   --accent:         #00e5ff;
   --accent-dim:     rgba(0,229,255,0.07);
   --accent-glow:    rgba(0,229,255,0.25);

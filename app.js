@@ -186,13 +186,13 @@ function selectTarget(btn) {
 
   // Placeholder text for the primary textarea
   document.getElementById('prompt').placeholder = analyzingUser
-    ? 'Enter the user prompt to analyze. Each phrase will be colour-coded by impact.\n\nExample:\nYou are an expert chef. Suggest three dinner recipes that are quick to make, use chicken, and are suitable for a family of four.'
-    : 'Enter a fixed user message that will stay constant during analysis.\n\nExample:\nSuggest three dinner recipes for a family of four.';
+    ? 'Enter the user prompt to analyze. Each phrase will be colour-coded by impact.\n\nExample:\nSuggest three dinner recipes that are quick to make, use chicken, and are suitable for a family of four.'
+    : 'Enter the system prompt to analyze. Each phrase will be colour-coded by impact.\n\nExample:\nYou are an expert chef. Always respond in a friendly tone. Focus on healthy ingredients. Avoid processed foods. Keep recipes under 30 minutes.';
 
   // Placeholder for the secondary (context) textarea
   document.getElementById('systemprompt').placeholder = analyzingUser
     ? 'Optional system prompt — held constant during analysis...'
-    : 'Enter the system prompt to analyze. Each phrase will be colour-coded by impact.\n\nExample:\nYou are an expert chef. Always respond in a friendly tone. Focus on healthy ingredients. Avoid processed foods. Keep recipes under 30 minutes.';
+    : 'Enter a fixed user message that will stay constant during analysis.\n\nExample:\nSuggest three dinner recipes for a family of four.';
 }
 
 
