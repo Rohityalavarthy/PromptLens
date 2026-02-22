@@ -169,30 +169,39 @@ function selectMethod(btn) {
  * Switch which prompt (user or system) is the analysis subject.
  * The other becomes the fixed context, held constant during perturbation.
  */
+const PLACEHOLDERS = {
+  user: {
+    analyzed: 'Enter the user prompt to analyze. Each phrase will be colour-coded by impact.\n\nExample:\nSuggest three dinner recipes that are quick to make, use chicken, and are suitable for a family of four.',
+    context:  'Optional system prompt — held constant during analysis...',
+  },
+  system: {
+    analyzed: 'Enter the system prompt to analyze. Each phrase will be colour-coded by impact.\n\nExample:\nYou are an expert chef. Always respond in a friendly tone. Focus on healthy ingredients. Avoid processed foods. Keep recipes under 30 minutes.',
+    context:  'Fixed user message held constant during analysis.\n\nExample:\nSuggest three dinner recipes for a family of four.',
+  },
+};
+
 function selectTarget(btn) {
+  if (btn.dataset.target === analysisTarget) return;
+
   document.querySelectorAll('.target-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   analysisTarget = btn.dataset.target;
 
   const analyzingUser = analysisTarget === 'user';
 
-  // Primary label (the one being analyzed)
+  // Labels are fixed to their textareas — only the badge changes
   document.getElementById('primaryLabel').innerHTML =
-    `${analyzingUser ? 'User Prompt' : 'System Prompt'} <span class="target-badge">Analyzed</span>`;
-
-  // Secondary label (held constant)
+    `User Prompt ${analyzingUser ? '<span class="target-badge">Analyzed</span>' : '<span class="optional">(held constant)</span>'}`;
   document.getElementById('secondaryLabel').innerHTML =
-    `${analyzingUser ? 'System Prompt' : 'User Prompt'} <span class="optional" id="secondaryOptional">(held constant)</span>`;
+    `System Prompt ${analyzingUser ? '<span class="optional">(held constant)</span>' : '<span class="target-badge">Analyzed</span>'}`;
 
-  // Placeholder text for the primary textarea
+  // Update placeholders
   document.getElementById('prompt').placeholder = analyzingUser
-    ? 'Enter the user prompt to analyze. Each phrase will be colour-coded by impact.\n\nExample:\nSuggest three dinner recipes that are quick to make, use chicken, and are suitable for a family of four.'
-    : 'Enter the system prompt to analyze. Each phrase will be colour-coded by impact.\n\nExample:\nYou are an expert chef. Always respond in a friendly tone. Focus on healthy ingredients. Avoid processed foods. Keep recipes under 30 minutes.';
-
-  // Placeholder for the secondary (context) textarea
+    ? PLACEHOLDERS.user.analyzed
+    : PLACEHOLDERS.system.context;
   document.getElementById('systemprompt').placeholder = analyzingUser
-    ? 'Optional system prompt — held constant during analysis...'
-    : 'Enter a fixed user message that will stay constant during analysis.\n\nExample:\nSuggest three dinner recipes for a family of four.';
+    ? PLACEHOLDERS.user.context
+    : PLACEHOLDERS.system.analyzed;
 }
 
 
@@ -506,18 +515,22 @@ function setRunning(running) {
 // ─── Main analysis ────────────────────────────────────────────────────────────
 
 async function runAnalysis() {
+  // Always read by stable semantic ID — #prompt is the user message,
+  // #systemprompt is the system message, regardless of which is visually on top.
   const userText   = document.getElementById('prompt').value.trim();
   const systemText = document.getElementById('systemprompt').value.trim();
 
-  // Route: whichever is the analysis target is "primary"; the other is fixed context
+  // analysisTarget tells us which one to tokenize and perturb.
+  // The other is passed through unchanged as fixed context.
   const analyzingUser = analysisTarget === 'user';
   const primaryText   = analyzingUser ? userText   : systemText;
   const contextText   = analyzingUser ? systemText : userText;
 
-  // For the API call: system prompt is always the system role,
-  // user prompt is always the user role — regardless of which we're analyzing.
-  // When analyzing the system prompt, contextText goes in the user role and
-  // primaryText is what we perturb in the system role.
+  // buildCall always puts text in the correct API role:
+  //   user message  → messages[].role === 'user'
+  //   system message → messages[].role === 'system'
+  // When analyzing the user prompt:   perturb userMsg, keep systemMsg fixed
+  // When analyzing the system prompt: perturb systemMsg, keep userMsg fixed
   const buildCall = (analyzedText) => ({
     userMsg:   analyzingUser ? analyzedText : contextText,
     systemMsg: analyzingUser ? contextText  : analyzedText,

@@ -81,7 +81,7 @@
           </div>
         </div>
 
-        <!-- Primary (analyzed) textarea -->
+        <!-- User prompt — always #prompt, always top -->
         <label class="field-label" id="primaryLabel" for="prompt" style="margin-top:18px;">User Prompt <span class="target-badge">Analyzed</span></label>
         <textarea
           id="prompt"
@@ -91,9 +91,9 @@ Example:
 You are an expert chef. Suggest three dinner recipes that are quick to make, use chicken, and are suitable for a family of four. Make sure the recipes are healthy and avoid processed ingredients."
         ></textarea>
 
-        <!-- Secondary (fixed context) textarea -->
-        <label class="field-label" id="secondaryLabel" for="systemprompt" style="margin-top:16px;">System Prompt <span class="optional" id="secondaryOptional">(held constant)</span></label>
-        <textarea id="systemprompt" rows="3" id="systemprompt" placeholder="Optional system prompt — held constant during analysis..."></textarea>
+        <!-- System prompt — always #systemprompt, always bottom -->
+        <label class="field-label" id="secondaryLabel" for="systemprompt" style="margin-top:16px;">System Prompt <span class="optional">(held constant)</span></label>
+        <textarea id="systemprompt" rows="3" placeholder="Optional system prompt — held constant during analysis..."></textarea>
 
         <div class="method-row">
           <label class="field-label" style="margin:0; white-space:nowrap;">Saliency Method</label>
@@ -172,6 +172,6 @@ You are an expert chef. Suggest three dinner recipes that are quick to make, use
     </section>
   </main>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>
