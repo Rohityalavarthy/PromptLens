@@ -61,8 +61,8 @@ No build step, no dependencies, no backend. It's three files.
 ### Run locally
 
 ```bash
-git clone https://github.com/<your-username>/promptlens.git
-cd promptlens
+git clone https://github.com/Rohityalavarthy/PromptLens.git
+cd PromptLens
 python3 -m http.server 8080
 # open http://localhost:8080
 ```
@@ -75,7 +75,7 @@ You'll see a 404 for `/favicon.ico` in the server logs — that's just the brows
 git init
 git add .
 git commit -m "initial commit"
-git remote add origin https://github.com/<your-username>/promptlens.git
+git remote add origin https://github.com/Rohityalavarthy/PromptLens.git
 git push -u origin main
 ```
 
