@@ -12,6 +12,8 @@ PromptLens runs a perturbation-based saliency analysis on your prompt. It splits
 
 You can analyze either the **user prompt** or the **system prompt**, which makes it useful both for end-user prompt engineering and for developers tuning system prompts in production applications.
 
+![Uploading Screenshot 2026-02-22 at 3.08.35 PM.png…]()
+
 ---
 
 ## How it works
