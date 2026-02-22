@@ -59,6 +59,7 @@ const METHOD_DESCRIPTIONS = {
 
 let selectedMethod   = 'perturbation';
 let selectedProvider = localStorage.getItem('promptlens_provider') || 'groq';
+let analysisTarget   = 'user';   // 'user' | 'system'
 
 // ─── Provider & key management ────────────────────────────────────────────────
 
@@ -162,7 +163,39 @@ function selectMethod(btn) {
   document.getElementById('methodDesc').innerHTML = METHOD_DESCRIPTIONS[selectedMethod];
 }
 
-// ─── LLM API — unified call ───────────────────────────────────────────────────
+// ─── Analysis target selector ─────────────────────────────────────────────────
+
+/**
+ * Switch which prompt (user or system) is the analysis subject.
+ * The other becomes the fixed context, held constant during perturbation.
+ */
+function selectTarget(btn) {
+  document.querySelectorAll('.target-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  analysisTarget = btn.dataset.target;
+
+  const analyzingUser = analysisTarget === 'user';
+
+  // Primary label (the one being analyzed)
+  document.getElementById('primaryLabel').innerHTML =
+    `${analyzingUser ? 'User Prompt' : 'System Prompt'} <span class="target-badge">Analyzed</span>`;
+
+  // Secondary label (held constant)
+  document.getElementById('secondaryLabel').innerHTML =
+    `${analyzingUser ? 'System Prompt' : 'User Prompt'} <span class="optional" id="secondaryOptional">(held constant)</span>`;
+
+  // Placeholder text for the primary textarea
+  document.getElementById('prompt').placeholder = analyzingUser
+    ? 'Enter the user prompt to analyze. Each phrase will be colour-coded by impact.\n\nExample:\nYou are an expert chef. Suggest three dinner recipes that are quick to make, use chicken, and are suitable for a family of four.'
+    : 'Enter a fixed user message that will stay constant during analysis.\n\nExample:\nSuggest three dinner recipes for a family of four.';
+
+  // Placeholder for the secondary (context) textarea
+  document.getElementById('systemprompt').placeholder = analyzingUser
+    ? 'Optional system prompt — held constant during analysis...'
+    : 'Enter the system prompt to analyze. Each phrase will be colour-coded by impact.\n\nExample:\nYou are an expert chef. Always respond in a friendly tone. Focus on healthy ingredients. Avoid processed foods. Keep recipes under 30 minutes.';
+}
+
+
 
 /**
  * Call the active provider's chat completions endpoint.
@@ -298,12 +331,12 @@ function cosineSim(a, b) {
 /**
  * Perturbation: replace phrase[i] with '[...]', re-run, measure divergence.
  */
-async function saliencyPerturbation(phrases, baseline, system, onTick) {
+async function saliencyPerturbation(phrases, baseline, callPerturbed, onTick) {
   const scores = [];
   for (let i = 0; i < phrases.length; i++) {
     const perturbed = phrases.map((p, j) => (j === i ? '[...]' : p)).join('');
     try {
-      const out = await callLLM(perturbed, system, 400);
+      const out = await callPerturbed(perturbed);
       scores.push(1 - cosineSim(baseline, out));
     } catch {
       scores.push(0);
@@ -316,12 +349,12 @@ async function saliencyPerturbation(phrases, baseline, system, onTick) {
 /**
  * Leave-one-out: remove phrase[i] entirely, re-run, measure divergence.
  */
-async function saliencyOmission(phrases, baseline, system, onTick) {
+async function saliencyOmission(phrases, baseline, callPerturbed, onTick) {
   const scores = [];
   for (let i = 0; i < phrases.length; i++) {
     const omitted = phrases.filter((_, j) => j !== i).join('') || ' ';
     try {
-      const out = await callLLM(omitted, system, 400);
+      const out = await callPerturbed(omitted);
       scores.push(1 - cosineSim(baseline, out));
     } catch {
       scores.push(0);
@@ -335,7 +368,7 @@ async function saliencyOmission(phrases, baseline, system, onTick) {
  * Paraphrase: ask the model to neutralise phrase[i], then re-run, measure divergence.
  * Costs 2× the API calls per phrase.
  */
-async function saliencyParaphrase(phrases, baseline, system, onTick) {
+async function saliencyParaphrase(phrases, baseline, callPerturbed, onTick) {
   const scores = [];
   for (let i = 0; i < phrases.length; i++) {
     let neutral = '[something]';
@@ -352,7 +385,7 @@ async function saliencyParaphrase(phrases, baseline, system, onTick) {
 
     const perturbed = phrases.map((p, j) => (j === i ? neutral : p)).join('');
     try {
-      const out = await callLLM(perturbed, system, 400);
+      const out = await callPerturbed(perturbed);
       scores.push(1 - cosineSim(baseline, out));
     } catch {
       scores.push(0);
@@ -473,8 +506,22 @@ function setRunning(running) {
 // ─── Main analysis ────────────────────────────────────────────────────────────
 
 async function runAnalysis() {
-  const prompt = document.getElementById('prompt').value.trim();
-  const system = document.getElementById('systemprompt').value.trim();
+  const userText   = document.getElementById('prompt').value.trim();
+  const systemText = document.getElementById('systemprompt').value.trim();
+
+  // Route: whichever is the analysis target is "primary"; the other is fixed context
+  const analyzingUser = analysisTarget === 'user';
+  const primaryText   = analyzingUser ? userText   : systemText;
+  const contextText   = analyzingUser ? systemText : userText;
+
+  // For the API call: system prompt is always the system role,
+  // user prompt is always the user role — regardless of which we're analyzing.
+  // When analyzing the system prompt, contextText goes in the user role and
+  // primaryText is what we perturb in the system role.
+  const buildCall = (analyzedText) => ({
+    userMsg:   analyzingUser ? analyzedText : contextText,
+    systemMsg: analyzingUser ? contextText  : analyzedText,
+  });
 
   hideError();
 
@@ -482,8 +529,9 @@ async function runAnalysis() {
     openKeyModal();
     return;
   }
-  if (!prompt) {
-    showError('Please enter a prompt to analyze.');
+  if (!primaryText) {
+    const label = analyzingUser ? 'user prompt' : 'system prompt';
+    showError(`Please enter a ${label} to analyze.`);
     return;
   }
 
@@ -500,32 +548,39 @@ async function runAnalysis() {
   setProgress('Tokenizing prompt…', 5);
 
   try {
-    // 1. Tokenize
-    const phrases = tokenizePhrases(prompt);
+    // 1. Tokenize the primary (analyzed) prompt
+    const phrases = tokenizePhrases(primaryText);
     document.getElementById('phraseCount').textContent =
       `${phrases.length} phrase${phrases.length !== 1 ? 's' : ''}`;
 
-    // 2. Baseline
+    // 2. Baseline — full unperturbed primary prompt
     setProgress(`Getting baseline response (${phrases.length} phrases found)…`, 15);
-    const baseline = await callLLM(prompt, system, 600);
+    const { userMsg: baseUser, systemMsg: baseSys } = buildCall(primaryText);
+    const baseline = await callLLM(baseUser, baseSys, 600);
 
     document.getElementById('modelOutputCard').style.display = 'block';
     document.getElementById('modelResponse').textContent = baseline;
 
-    // 3. Saliency
+    // 3. Saliency — perturb one phrase at a time from the primary prompt
     setProgress(`Running ${selectedMethod} saliency…`, 20);
     const onTick = (done, total) => {
       const pct = 20 + Math.round((done / total) * 72);
       setProgress(`${selectedMethod}: ${done} / ${total} phrases…`, pct);
     };
 
+    // Wrap saliency methods to use buildCall routing
+    const perturbedCall = async (perturbedText) => {
+      const { userMsg, systemMsg } = buildCall(perturbedText);
+      return callLLM(userMsg, systemMsg, 400);
+    };
+
     let rawScores;
     if (selectedMethod === 'perturbation') {
-      rawScores = await saliencyPerturbation(phrases, baseline, system, onTick);
+      rawScores = await saliencyPerturbation(phrases, baseline, perturbedCall, onTick);
     } else if (selectedMethod === 'omission') {
-      rawScores = await saliencyOmission(phrases, baseline, system, onTick);
+      rawScores = await saliencyOmission(phrases, baseline, perturbedCall, onTick);
     } else {
-      rawScores = await saliencyParaphrase(phrases, baseline, system, onTick);
+      rawScores = await saliencyParaphrase(phrases, baseline, perturbedCall, onTick);
     }
 
     // 4. Normalise and render

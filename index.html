@@ -71,7 +71,18 @@
         Prompt Input
       </div>
       <div class="panel-body">
-        <label class="field-label" for="prompt">User Prompt</label>
+
+        <!-- Analysis target toggle -->
+        <div class="target-toggle-row">
+          <span class="field-label" style="margin:0;">Analyze</span>
+          <div class="target-toggle">
+            <button class="target-btn active" data-target="user" onclick="selectTarget(this)">User Prompt</button>
+            <button class="target-btn" data-target="system" onclick="selectTarget(this)">System Prompt</button>
+          </div>
+        </div>
+
+        <!-- Primary (analyzed) textarea -->
+        <label class="field-label" id="primaryLabel" for="prompt" style="margin-top:18px;">User Prompt <span class="target-badge">Analyzed</span></label>
         <textarea
           id="prompt"
           placeholder="Enter your prompt here. Each phrase will be colour-coded by how much it shapes the model output.
@@ -80,8 +91,9 @@ Example:
 You are an expert chef. Suggest three dinner recipes that are quick to make, use chicken, and are suitable for a family of four. Make sure the recipes are healthy and avoid processed ingredients."
         ></textarea>
 
-        <label class="field-label" for="systemprompt" style="margin-top:16px;">System Prompt <span class="optional">(optional)</span></label>
-        <textarea id="systemprompt" rows="3" placeholder="Optional system-level instructions..."></textarea>
+        <!-- Secondary (fixed context) textarea -->
+        <label class="field-label" id="secondaryLabel" for="systemprompt" style="margin-top:16px;">System Prompt <span class="optional" id="secondaryOptional">(held constant)</span></label>
+        <textarea id="systemprompt" rows="3" id="systemprompt" placeholder="Optional system prompt — held constant during analysis..."></textarea>
 
         <div class="method-row">
           <label class="field-label" style="margin:0; white-space:nowrap;">Saliency Method</label>
