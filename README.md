@@ -1,96 +1,110 @@
-# PromptLens 🔬
+# PromptLens
 
-**A browser-based prompt saliency debugger for prompt engineers.**
+A browser-based saliency debugger for prompt engineers and developers building LLM applications. Paste a prompt, run the analysis, and get your prompt back colour-coded by how much each phrase actually influences the model output.
 
-Paste any prompt, click Analyze, and see your prompt colour-coded by how much each phrase contributes to the model's output. Red = high impact, blue = low impact. Useful for identifying which parts of your prompt are actually doing work — and which are redundant.
+Built this because I kept iterating on prompts with no real signal on what was doing work and what wasn't. Most debugging is just vibes — this makes it measurable.
 
-![PromptLens screenshot](https://via.placeholder.com/900x500/0a0a0b/00e5ff?text=PromptLens)
+---
+
+## What it does
+
+PromptLens runs a perturbation-based saliency analysis on your prompt. It splits the prompt into phrases, systematically perturbs each one, re-runs the prompt, and measures how much the output changes. The more the output diverges when a phrase is modified, the higher that phrase's saliency score. The result is your original prompt rendered as colour-coded text — blue for low impact, red for high impact — with exact percentage scores on hover.
+
+You can analyze either the **user prompt** or the **system prompt**, which makes it useful both for end-user prompt engineering and for developers tuning system prompts in production applications.
 
 ---
 
 ## How it works
 
-1. **Phrase tokenization** — your prompt is split into sentences and sub-clauses.
-2. **Baseline generation** — the full prompt is sent to Llama 3.3 70B (via Groq) to get a reference output.
-3. **Saliency computation** — one of three methods perturbs each phrase one at a time and measures how much the output diverges from the baseline.
-4. **Score normalisation** — raw divergence scores are min-max normalised so the full colour range is always used.
-5. **Rendering** — each phrase is wrapped in a colour-coded span. Hover any phrase to see its exact impact percentage.
+### 1. Phrase tokenization
 
-### Saliency methods
+The prompt is split at sentence boundaries (`.`, `!`, `?`, newlines), then long sentences are further split at clause boundaries (`,`, `;`) until each chunk is roughly 35–60 characters. This gives phrase-level granularity without the noise of token-level coloring.
 
-| Method | How it works | Best for |
-|---|---|---|
-| **Perturbation** | Replaces phrase with `[...]` | Fast, general purpose |
-| **Leave-One-Out** | Removes phrase entirely | Short, dense prompts |
-| **Paraphrase** | Asks model to rewrite phrase as vague filler, then re-runs | Most semantically accurate |
+### 2. Baseline generation
 
-### Divergence measurement
+The full unmodified prompt is sent to the model once to get a reference output. All subsequent comparisons are made against this baseline.
 
-Output divergence is computed via **character trigram cosine similarity**. After perturbing a phrase, the new output is compared to the baseline using overlapping 3-character substrings. Low similarity = high importance. This approach is language-agnostic, requires no NLP library, and is robust to minor paraphrasing.
+### 3. Saliency computation
+
+Three methods are available:
+
+| Method | Mechanism | API calls | Best for |
+|---|---|---|---|
+| **Perturbation** | Replaces each phrase with `[...]` | N+1 | General use, fastest |
+| **Leave-One-Out** | Removes each phrase entirely | N+1 | Short, dense prompts |
+| **Paraphrase** | Asks the model to rewrite each phrase as something maximally vague, then re-runs | 2N+1 | Most semantically accurate signal |
+
+### 4. Divergence measurement
+
+Output similarity is computed using **character trigram cosine similarity** — overlapping 3-character substrings are extracted from both outputs, frequency vectors are built, and cosine distance is computed. Saliency score = `1 - similarity`. This is language-agnostic, requires no NLP library, and is robust to surface-level paraphrasing in the model output.
+
+### 5. Normalisation and rendering
+
+Raw scores are min-max normalised across all phrases so the full colour range is always used. Each phrase is rendered as an inline span with a background interpolated across a 5-stop gradient (dark blue → cyan → amber → orange → red). Hovering any phrase shows its exact impact percentage.
+
+---
+
+## Analyzing system prompts
+
+The toggle at the top of the input panel switches between analyzing the user prompt and the system prompt. Whichever is selected gets the saliency treatment; the other is held constant as context throughout all perturbation passes.
+
+This is the main reason I built support for system prompt analysis rather than keeping it user-prompt-only — if you're a developer shipping an LLM feature, your system prompt is where most of the complexity lives and it's exactly what you want to be able to debug.
+
+When analyzing the system prompt, make sure to fill in a representative user message in the lower field. The quality of the saliency signal depends on having a realistic user turn for the model to respond to.
 
 ---
 
 ## Getting started
 
-### Option 1 — GitHub Pages (live demo)
+No build step, no dependencies, no backend. It's three files.
 
-Visit: **`https://<your-username>.github.io/promptlens`**
-
-You'll need a free [Groq API key](#groq-api-key) to use it.
-
-### Option 2 — Run locally
+### Run locally
 
 ```bash
 git clone https://github.com/<your-username>/promptlens.git
 cd promptlens
-# Open in browser — no build step needed
-open index.html
-# Or use any static server:
-npx serve .
 python3 -m http.server 8080
+# open http://localhost:8080
 ```
 
----
+You'll see a 404 for `/favicon.ico` in the server logs — that's just the browser looking for a tab icon, it's harmless.
 
-## API Keys
-
-PromptLens runs entirely in your browser. You choose which provider to use — your key is saved to `localStorage` and is only ever sent to the provider's servers directly from your browser.
-
-### Groq (recommended)
-
-Runs **Llama 3.3 70B Versatile**. Fastest inference, most generous free tier.
-
-1. Go to [console.groq.com/keys](https://console.groq.com/keys)
-2. Sign up free — no credit card required
-3. Create a key (starts with `gsk_`) and paste it into PromptLens
-
-Free tier limits: ~30 requests/min, ~14,400 req/day.
-
-### Together AI
-
-Runs **Llama 3.3 70B Instruct Turbo**. Good alternative if you hit Groq rate limits.
-
-1. Go to [api.together.ai/settings/api-keys](https://api.together.ai/settings/api-keys)
-2. Sign up free — $1 credit included, no credit card required
-3. Create a key and paste it into PromptLens
-
-**A single PromptLens analysis uses `N+1` API calls** where N is the number of phrases (typically 5–15). The paraphrase method uses `2N+1` calls. Both providers' free tiers handle this comfortably.
-
----
-
-## Deploying to GitHub Pages
+### Deploy to GitHub Pages
 
 ```bash
-# 1. Create a repo on GitHub named "promptlens"
 git init
 git add .
-git commit -m "Initial commit"
+git commit -m "initial commit"
 git remote add origin https://github.com/<your-username>/promptlens.git
 git push -u origin main
-
-# 2. Enable GitHub Pages in repo Settings → Pages → Source: main branch / root
-# 3. Your app is live at https://<your-username>.github.io/promptlens
 ```
+
+Then go to **Settings → Pages → Source** and set it to `main` branch, root folder. GitHub will give you a live URL within about a minute. No config needed — it's a static site.
+
+---
+
+## API keys
+
+PromptLens supports two providers. Keys are stored in `localStorage` and never leave your browser — every request goes directly from your browser to the provider's API.
+
+### Groq — recommended
+
+Runs `llama-3.3-70b-versatile`. Fastest inference of any free API available, very generous rate limits.
+
+1. Sign up at [console.groq.com](https://console.groq.com/keys) — no credit card required
+2. Create an API key (starts with `gsk_`)
+3. Paste it into the key modal in PromptLens
+
+Free tier: ~30 requests/min, ~14,400/day. A standard perturbation analysis on a 10-phrase prompt uses 11 calls, so you have a lot of headroom.
+
+### Together AI — alternative
+
+Runs `meta-llama/Llama-3.3-70B-Instruct-Turbo`. Same model family as Groq, useful fallback if you're hitting rate limits.
+
+1. Sign up at [api.together.ai](https://api.together.ai/settings/api-keys) — comes with $1 free credit, no credit card
+2. Create an API key and paste it in
+
+Both providers use the OpenAI-compatible `/v1/chat/completions` format so the same request logic works for both.
 
 ---
 
@@ -98,22 +112,33 @@ git push -u origin main
 
 ```
 promptlens/
-├── index.html      # App shell and markup
-├── style.css       # All styles
-├── app.js          # Tokenization, saliency logic, Groq API calls, rendering
+├── index.html    # markup and layout
+├── style.css     # all styles, CSS custom properties for theming
+├── app.js        # tokenization, saliency methods, API calls, rendering
 └── README.md
 ```
 
+`app.js` is organized into clearly commented sections: provider config → state → key management → method/target selection → LLM call → tokenization → similarity → saliency methods → normalisation → colour mapping → rendering → main analysis runner.
+
 ---
 
-## Contributing
+## Limitations worth knowing
 
-Issues and PRs welcome. Some ideas for improvement:
-- [ ] Export saliency report as PDF/image
-- [ ] Side-by-side comparison of two prompts
-- [ ] Attention head visualisation (requires model API support)
-- [ ] Batch analysis across multiple test cases
-- [ ] Support for OpenAI / Anthropic keys as alternatives
+**The divergence metric is approximate.** Character trigram similarity is a proxy for semantic similarity — it's fast and requires no dependencies, but it can miss cases where the model output changes meaning without changing surface form, or flag false positives when the model uses different phrasing to say the same thing. For most prompts it works well enough to be genuinely useful.
+
+**Temperature is fixed at 0.** All API calls use `temperature: 0` to keep outputs as deterministic as possible. This matters — if outputs vary randomly between calls, saliency scores become noise. Even at temperature 0 some providers have minor non-determinism, so treat scores as directional rather than exact.
+
+**API call count scales linearly.** A prompt with 20 phrases runs 21 calls in perturbation/omission mode, 41 in paraphrase mode. On long prompts this takes time and burns through rate limit quota faster. If you're hitting limits, stick to perturbation mode and keep prompts under ~200 words.
+
+---
+
+## Roadmap
+
+- [ ] Export saliency map as image
+- [ ] Side-by-side diff of two prompt variants
+- [ ] Batch mode — run the same analysis across multiple test inputs and aggregate scores
+- [ ] OpenAI and Anthropic key support
+- [ ] Configurable phrase granularity (word / clause / sentence)
 
 ---
 
