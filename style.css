@@ -569,6 +569,49 @@ textarea::placeholder { color: var(--text-dimmer); }
   min-height: 16px;
 }
 
+/* ─── Provider tabs ───────────────────────────────────────────────────── */
+.provider-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.provider-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 10px 12px;
+  background: transparent;
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.14s;
+}
+.provider-tab:hover { border-color: var(--accent); }
+.provider-tab.active {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.provider-tab-label {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text-dim);
+  transition: color 0.14s;
+}
+.provider-tab.active .provider-tab-label { color: var(--accent); }
+
+.provider-tab-sub {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  color: var(--text-dimmer);
+}
+
+/* ─── Modal actions ───────────────────────────────────────────────────── */
 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
 
 .btn-primary {

@@ -52,19 +52,29 @@ python3 -m http.server 8080
 
 ---
 
-## Groq API Key
+## API Keys
 
-PromptLens uses [Groq](https://groq.com) to run **Llama 3.3 70B** inference — the fastest freely-available LLM API as of 2025.
+PromptLens runs entirely in your browser. You choose which provider to use — your key is saved to `localStorage` and is only ever sent to the provider's servers directly from your browser.
 
-**To get a free key:**
+### Groq (recommended)
+
+Runs **Llama 3.3 70B Versatile**. Fastest inference, most generous free tier.
+
 1. Go to [console.groq.com/keys](https://console.groq.com/keys)
-2. Sign up — no credit card required
-3. Create a new API key (starts with `gsk_`)
-4. Click **"Add API Key"** in PromptLens and paste it in
+2. Sign up free — no credit card required
+3. Create a key (starts with `gsk_`) and paste it into PromptLens
 
-**Your key is stored only in your browser's `localStorage`** — it is never sent to any server other than `api.groq.com`. The tool is fully static with no backend.
+Free tier limits: ~30 requests/min, ~14,400 req/day.
 
-**Groq free tier limits** (as of 2025): ~30 requests/min, ~14,400 req/day. A single PromptLens analysis uses `N+1` API calls where N is the number of phrases (typically 5–15). The paraphrase method uses `2N+1` calls.
+### Together AI
+
+Runs **Llama 3.3 70B Instruct Turbo**. Good alternative if you hit Groq rate limits.
+
+1. Go to [api.together.ai/settings/api-keys](https://api.together.ai/settings/api-keys)
+2. Sign up free — $1 credit included, no credit card required
+3. Create a key and paste it into PromptLens
+
+**A single PromptLens analysis uses `N+1` API calls** where N is the number of phrases (typically 5–15). The paraphrase method uses `2N+1` calls. Both providers' free tiers handle this comfortably.
 
 ---
 

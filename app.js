@@ -2,9 +2,10 @@
  * PromptLens — app.js
  *
  * Architecture:
- *  1. User supplies a Groq API key (stored in localStorage, never leaves the browser).
+ *  1. User selects a provider (Groq or Together AI) and supplies their API key,
+ *     stored in localStorage — never sent anywhere except the chosen provider's servers.
  *  2. The prompt is tokenized into phrases (sentence → clause level).
- *  3. A baseline response is obtained from Groq (llama-3.3-70b-versatile).
+ *  3. A baseline response is obtained from the selected model.
  *  4. One of three saliency methods computes an importance score per phrase
  *     by perturbing it and measuring output divergence via character-trigram cosine similarity.
  *  5. Scores are min-max normalised and rendered as inline colour spans.
@@ -12,11 +13,41 @@
 
 'use strict';
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+// ─── Provider config ──────────────────────────────────────────────────────────
+//
+// Both providers expose an OpenAI-compatible /chat/completions endpoint,
+// so the same fetch logic works for both — only the URL, model, and key differ.
 
-const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
-const GROQ_MODEL    = 'llama-3.3-70b-versatile';
-const STORAGE_KEY   = 'promptlens_groq_key';
+const PROVIDERS = {
+  groq: {
+    id:          'groq',
+    label:       'Groq',
+    model:       'llama-3.3-70b-versatile',
+    endpoint:    'https://api.groq.com/openai/v1/chat/completions',
+    storageKey:  'promptlens_groq_key',
+    keyPrefix:   'gsk_',
+    keyHint:     'gsk_••••••••••••••••••••••••',
+    signupUrl:   'https://console.groq.com/keys',
+    signupLabel: 'console.groq.com/keys',
+    freeNote:    'Free tier · No credit card · ~30 req/min',
+    rateLimitMsg:'Groq rate limit hit. Wait a moment then try again (free tier: ~30 req/min).',
+  },
+  together: {
+    id:          'together',
+    label:       'Together AI',
+    model:       'meta-llama/Llama-3.3-70B-Instruct-Turbo',
+    endpoint:    'https://api.together.xyz/v1/chat/completions',
+    storageKey:  'promptlens_together_key',
+    keyPrefix:   null,   // Together keys have no fixed prefix
+    keyHint:     '••••••••••••••••••••••••••••••••',
+    signupUrl:   'https://api.together.ai/settings/api-keys',
+    signupLabel: 'api.together.ai/settings/api-keys',
+    freeNote:    'Free $1 credit on sign-up · No credit card required',
+    rateLimitMsg:'Together AI rate limit hit. Wait a moment then try again.',
+  },
+};
+
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const METHOD_DESCRIPTIONS = {
   perturbation: 'Replaces each phrase with <code>[...]</code> and measures how much the model output changes. Fast and reliable for most prompts.',
@@ -26,30 +57,65 @@ const METHOD_DESCRIPTIONS = {
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
-let selectedMethod = 'perturbation';
+let selectedMethod   = 'perturbation';
+let selectedProvider = localStorage.getItem('promptlens_provider') || 'groq';
 
-// ─── Key management ───────────────────────────────────────────────────────────
+// ─── Provider & key management ────────────────────────────────────────────────
 
-function getKey() {
-  return localStorage.getItem(STORAGE_KEY) || '';
+function getProvider() {
+  return PROVIDERS[selectedProvider];
+}
+
+function getKey(providerId) {
+  const p = providerId ? PROVIDERS[providerId] : getProvider();
+  return localStorage.getItem(p.storageKey) || '';
 }
 
 function updateKeyButton() {
   const key   = getKey();
+  const p     = getProvider();
   const btn   = document.getElementById('keyBtn');
   const label = document.getElementById('keyBtnLabel');
   if (key) {
     btn.classList.add('has-key');
-    label.textContent = 'Key saved ✓';
+    label.textContent = `${p.label} ✓`;
   } else {
     btn.classList.remove('has-key');
     label.textContent = 'Add API Key';
   }
 }
 
-function openKeyModal() {
-  document.getElementById('keyInput').value = getKey();
+/** Populate modal fields to reflect whichever provider tab is active. */
+function refreshModalForProvider(providerId) {
+  const p = PROVIDERS[providerId];
+
+  // Tab active states
+  document.querySelectorAll('.provider-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.provider === providerId);
+  });
+
+  // Instructions
+  document.getElementById('providerSignupUrl').href        = p.signupUrl;
+  document.getElementById('providerSignupLabel').textContent = p.signupLabel;
+  document.getElementById('providerFreeNote').textContent  = p.freeNote;
+  document.getElementById('providerModel').textContent     = p.model;
+
+  // Input
+  const input = document.getElementById('keyInput');
+  input.placeholder = p.keyHint;
+  input.value       = getKey(providerId);
+
   document.getElementById('keyError').textContent = '';
+}
+
+function selectProviderTab(tab) {
+  selectedProvider = tab.dataset.provider;
+  localStorage.setItem('promptlens_provider', selectedProvider);
+  refreshModalForProvider(selectedProvider);
+}
+
+function openKeyModal() {
+  refreshModalForProvider(selectedProvider);
   document.getElementById('keyModal').classList.add('open');
   document.getElementById('modalBackdrop').classList.add('open');
   setTimeout(() => document.getElementById('keyInput').focus(), 80);
@@ -61,18 +127,27 @@ function closeKeyModal() {
 }
 
 function saveKey() {
+  const p   = PROVIDERS[selectedProvider];
   const val = document.getElementById('keyInput').value.trim();
-  if (!val.startsWith('gsk_')) {
-    document.getElementById('keyError').textContent = 'Groq keys start with "gsk_" — double-check you\'ve copied the full key.';
+
+  if (!val) {
+    document.getElementById('keyError').textContent = 'Please paste your API key.';
     return;
   }
-  localStorage.setItem(STORAGE_KEY, val);
+  if (p.keyPrefix && !val.startsWith(p.keyPrefix)) {
+    document.getElementById('keyError').textContent =
+      `${p.label} keys start with "${p.keyPrefix}" — double-check you've copied the full key.`;
+    return;
+  }
+
+  localStorage.setItem(p.storageKey, val);
   updateKeyButton();
   closeKeyModal();
 }
 
 function clearKey() {
-  localStorage.removeItem(STORAGE_KEY);
+  const p = PROVIDERS[selectedProvider];
+  localStorage.removeItem(p.storageKey);
   document.getElementById('keyInput').value = '';
   document.getElementById('keyError').textContent = '';
   updateKeyButton();
@@ -87,33 +162,39 @@ function selectMethod(btn) {
   document.getElementById('methodDesc').innerHTML = METHOD_DESCRIPTIONS[selectedMethod];
 }
 
-// ─── Groq API ─────────────────────────────────────────────────────────────────
+// ─── LLM API — unified call ───────────────────────────────────────────────────
 
 /**
- * Call the Groq chat completions endpoint.
+ * Call the active provider's chat completions endpoint.
+ * Both Groq and Together AI use the OpenAI-compatible format.
+ *
  * @param {string} userMsg
  * @param {string} systemMsg
  * @param {number} maxTokens
  * @returns {Promise<string>}
  */
-async function callGroq(userMsg, systemMsg = '', maxTokens = 500) {
+async function callLLM(userMsg, systemMsg = '', maxTokens = 500) {
+  const p   = getProvider();
   const key = getKey();
-  if (!key) throw new Error('No API key set. Click "Add API Key" to add your free Groq key.');
+
+  if (!key) {
+    throw new Error(`No ${p.label} API key set. Click "Add API Key" to add your key.`);
+  }
 
   const messages = [];
   if (systemMsg) messages.push({ role: 'system', content: systemMsg });
   messages.push({ role: 'user', content: userMsg });
 
-  const res = await fetch(GROQ_ENDPOINT, {
+  const res = await fetch(p.endpoint, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
+      'Content-Type':  'application/json',
       'Authorization': `Bearer ${key}`,
     },
     body: JSON.stringify({
-      model: GROQ_MODEL,
+      model:       p.model,
       messages,
-      max_tokens: maxTokens,
+      max_tokens:  maxTokens,
       temperature: 0.0,   // deterministic — essential for stable divergence measurement
     }),
   });
@@ -121,9 +202,9 @@ async function callGroq(userMsg, systemMsg = '', maxTokens = 500) {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     const msg = err?.error?.message || `HTTP ${res.status}`;
-    if (res.status === 401) throw new Error('Invalid API key. Check your Groq key and try again.');
-    if (res.status === 429) throw new Error('Groq rate limit hit. Wait a moment then try again (free tier: ~30 req/min).');
-    throw new Error(`Groq API error: ${msg}`);
+    if (res.status === 401) throw new Error(`Invalid ${p.label} API key. Check your key and try again.`);
+    if (res.status === 429) throw new Error(p.rateLimitMsg);
+    throw new Error(`${p.label} API error: ${msg}`);
   }
 
   const data = await res.json();
@@ -222,7 +303,7 @@ async function saliencyPerturbation(phrases, baseline, system, onTick) {
   for (let i = 0; i < phrases.length; i++) {
     const perturbed = phrases.map((p, j) => (j === i ? '[...]' : p)).join('');
     try {
-      const out = await callGroq(perturbed, system, 400);
+      const out = await callLLM(perturbed, system, 400);
       scores.push(1 - cosineSim(baseline, out));
     } catch {
       scores.push(0);
@@ -240,7 +321,7 @@ async function saliencyOmission(phrases, baseline, system, onTick) {
   for (let i = 0; i < phrases.length; i++) {
     const omitted = phrases.filter((_, j) => j !== i).join('') || ' ';
     try {
-      const out = await callGroq(omitted, system, 400);
+      const out = await callLLM(omitted, system, 400);
       scores.push(1 - cosineSim(baseline, out));
     } catch {
       scores.push(0);
@@ -259,7 +340,7 @@ async function saliencyParaphrase(phrases, baseline, system, onTick) {
   for (let i = 0; i < phrases.length; i++) {
     let neutral = '[something]';
     try {
-      neutral = await callGroq(
+      neutral = await callLLM(
         `Rewrite the following phrase to remove all specific information, ` +
         `making it maximally vague and uninformative. ` +
         `Keep roughly the same character length. ` +
@@ -271,7 +352,7 @@ async function saliencyParaphrase(phrases, baseline, system, onTick) {
 
     const perturbed = phrases.map((p, j) => (j === i ? neutral : p)).join('');
     try {
-      const out = await callGroq(perturbed, system, 400);
+      const out = await callLLM(perturbed, system, 400);
       scores.push(1 - cosineSim(baseline, out));
     } catch {
       scores.push(0);
@@ -426,7 +507,7 @@ async function runAnalysis() {
 
     // 2. Baseline
     setProgress(`Getting baseline response (${phrases.length} phrases found)…`, 15);
-    const baseline = await callGroq(prompt, system, 600);
+    const baseline = await callLLM(prompt, system, 600);
 
     document.getElementById('modelOutputCard').style.display = 'block';
     document.getElementById('modelResponse').textContent = baseline;

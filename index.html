@@ -23,23 +23,34 @@
   <div class="modal-backdrop" id="modalBackdrop" onclick="closeKeyModal()"></div>
   <div class="modal" id="keyModal">
     <div class="modal-header">
-      <span>Groq API Key</span>
+      <span>API Provider & Key</span>
       <button class="modal-close" onclick="closeKeyModal()">✕</button>
     </div>
     <div class="modal-body">
-      <p class="modal-desc">
-        PromptLens uses <strong>Groq's free API</strong> (Llama 3.3 70B) to run saliency analysis.
-        Your key is stored only in your browser — never sent anywhere except Groq's servers.
-      </p>
-      <div class="modal-steps">
-        <span>1.</span> Go to <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a>
-        <br/><span>2.</span> Sign up free (no credit card needed)
-        <br/><span>3.</span> Create an API key and paste it below
+
+      <!-- Provider tabs -->
+      <div class="provider-tabs">
+        <button class="provider-tab active" data-provider="groq" onclick="selectProviderTab(this)">
+          <span class="provider-tab-label">Groq</span>
+          <span class="provider-tab-sub">Llama 3.3 70B</span>
+        </button>
+        <button class="provider-tab" data-provider="together" onclick="selectProviderTab(this)">
+          <span class="provider-tab-label">Together AI</span>
+          <span class="provider-tab-sub">Llama 3.3 70B Turbo</span>
+        </button>
       </div>
+
+      <!-- Instructions (populated by JS) -->
+      <div class="modal-steps">
+        <span>1.</span> Go to <a id="providerSignupUrl" href="#" target="_blank" rel="noopener"><span id="providerSignupLabel"></span></a><br/>
+        <span>2.</span> Sign up free — <span id="providerFreeNote"></span><br/>
+        <span>3.</span> Create an API key and paste it below<br/>
+        <span>4.</span> Model used: <code id="providerModel"></code>
+      </div>
+
       <input
         type="password"
         id="keyInput"
-        placeholder="gsk_••••••••••••••••••••••••"
         autocomplete="off"
         spellcheck="false"
       />
@@ -48,6 +59,7 @@
         <button class="btn-secondary" onclick="clearKey()">Clear</button>
         <button class="btn-primary" onclick="saveKey()">Save Key</button>
       </div>
+
     </div>
   </div>
 
