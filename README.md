@@ -8,7 +8,7 @@ Built this because I kept iterating on prompts with no real signal on what was d
 
 ## What it does
 
-PromptLens runs a perturbation-based saliency analysis on your prompt. It splits the prompt into phrases, systematically perturbs each one, re-runs the prompt, and measures how much the output changes. The more the output diverges when a phrase is modified, the higher that phrase's saliency score. The result is your original prompt rendered as colour-coded text — blue for low impact, red for high impact — with exact percentage scores on hover.
+PromptLens runs a perturbation-based saliency analysis on your prompt. It splits the prompt into phrases, systematically perturbs each one, re-runs the prompt, and measures how much the output changes. The more the output diverges when a phrase is modified, the higher that phrase's saliency score. The result is your original prompt rendered as colour-coded text — blue for low impact, red for high impact - with exact percentage scores on hover.
 
 You can analyze either the **user prompt** or the **system prompt**, which makes it useful both for end-user prompt engineering and for developers tuning system prompts in production applications.
 
@@ -89,7 +89,7 @@ Then go to **Settings → Pages → Source** and set it to `main` branch, root f
 
 ## API keys
 
-PromptLens supports two providers. Keys are stored in `localStorage` and never leave your browser — every request goes directly from your browser to the provider's API.
+PromptLens supports two providers. Keys are stored in `localStorage` and never leave your browser - every request goes directly from your browser to the provider's API.
 
 ### Groq — recommended
 
