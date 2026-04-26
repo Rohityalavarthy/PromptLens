@@ -14,7 +14,8 @@ PromptLens runs a Shapley attribution analysis on your prompt. It splits the pro
 
 You can analyze either the **user prompt** or the **system prompt**, which makes it useful both for end-user prompt engineering and for developers tuning system prompts in production applications.
 
-![PromptLens screenshot](assets/view.png)
+<img width="1414" height="810" alt="Screenshot 2026-04-26 at 8 51 39 PM" src="https://github.com/user-attachments/assets/ee13a2b0-1ee8-450b-8196-566ac70064b7" />
+
 
 ---
 
