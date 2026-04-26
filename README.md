@@ -145,8 +145,8 @@ promptlens/
 
 ## Future Roadmap
 
-- [ ] Export saliency map as image
-- [ ] Side-by-side diff of two prompt variants
+- [ ] Extend capabilities to a comprehensive agent - deployable via Github Apps
+- [ ] Extend further to be a VSC extension
 - [ ] Batch mode - run the same analysis across multiple test inputs and aggregate scores
 - [ ] OpenAI and Anthropic key support
 
