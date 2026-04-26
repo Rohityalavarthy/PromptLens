@@ -4,14 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PromptLens — Prompt Saliency Debugger</title>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=2" />
 </head>
 <body>
 
   <header>
     <div class="logo">Prompt<span>Lens</span></div>
     <div class="header-right">
-      <span class="badge">Saliency Debugger</span>
       <button class="key-btn" id="keyBtn" onclick="openKeyModal()">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
         <span id="keyBtnLabel">Add API Key</span>
@@ -74,7 +73,6 @@
 
         <!-- Analysis target toggle -->
         <div class="target-toggle-row">
-          <span class="field-label" style="margin:0;">Analyze</span>
           <div class="target-toggle">
             <button class="target-btn active" data-target="user" onclick="selectTarget(this)">User Prompt</button>
             <button class="target-btn" data-target="system" onclick="selectTarget(this)">System Prompt</button>
@@ -85,19 +83,22 @@
         <label class="field-label" id="primaryLabel" for="prompt" style="margin-top:18px;">User Prompt <span class="target-badge">Analyzed</span></label>
         <textarea
           id="prompt"
-          placeholder="Enter your prompt here. Each phrase will be colour-coded by how much it shapes the model output.
+          class="textarea--primary"
+          placeholder="Paste your prompt here — each phrase will be colour-coded by how much it shapes the model output.
 
 Example:
-You are an expert chef. Suggest three dinner recipes that are quick to make, use chicken, and are suitable for a family of four. Make sure the recipes are healthy and avoid processed ingredients."
+You are an expert chef. Suggest three dinner recipes that are quick to make, use chicken, and are suitable for a family of four."
         ></textarea>
 
         <!-- System prompt — always #systemprompt, always bottom -->
-        <label class="field-label" id="secondaryLabel" for="systemprompt" style="margin-top:16px;">System Prompt <span class="optional">(held constant)</span></label>
-        <textarea id="systemprompt" rows="3" placeholder="Optional system prompt — held constant during analysis..."></textarea>
+        <label class="field-label field-label--secondary" id="secondaryLabel" for="systemprompt" style="margin-top:16px;">System Prompt <span class="optional">(held constant)</span></label>
+        <textarea id="systemprompt" class="textarea--secondary" placeholder="Held constant during analysis — use something representative of real usage."></textarea>
+
+        <div class="settings-divider">Analysis Settings</div>
 
         <div class="method-row">
           <label class="field-label" style="margin:0; white-space:nowrap;">Saliency Method</label>
-          <div class="method-group">
+          <div class="method-group" style="justify-content:space-between; align-items:center;">
             <span class="method-badge">Shapley Attribution</span>
             <button class="advanced-toggle" onclick="toggleAdvanced()">Advanced ▾</button>
           </div>
@@ -108,7 +109,7 @@ You are an expert chef. Suggest three dinner recipes that are quick to make, use
         </div>
 
         <div class="advanced-row" id="advancedRow" style="display:none;">
-          <label class="field-label" style="margin:0; white-space:nowrap; font-size:12px;">Samples</label>
+          <label class="field-label" style="margin:0; white-space:nowrap; display:flex; align-items:center;">Samples</label>
           <div class="method-group">
             <button class="method-btn" data-m="10" onclick="selectShapleyM(this)">Fast (10)</button>
             <button class="method-btn active" data-m="20" onclick="selectShapleyM(this)">Balanced (20)</button>
@@ -119,12 +120,10 @@ You are an expert chef. Suggest three dinner recipes that are quick to make, use
         <div class="method-row" id="similarityRow" style="display:none;">
           <label class="field-label" style="margin:0; white-space:nowrap;">Similarity</label>
           <div class="method-group">
-            <button class="method-btn sim-btn" data-sim="trigram" onclick="selectSimilarity(this)">Standard</button>
-            <button class="method-btn sim-btn active" data-sim="semantic" onclick="selectSimilarity(this)">Semantic</button>
+            <button class="method-btn sim-btn" data-sim="trigram" onclick="selectSimilarity(this)" data-tooltip="Trigram overlap — fast, no extra API calls">Standard</button>
+            <button class="method-btn sim-btn active" data-sim="semantic" onclick="selectSimilarity(this)" data-tooltip="Embedding cosine — meaning-level divergence (requires Together AI key)">Semantic</button>
           </div>
         </div>
-
-        <div id="simDesc" class="method-desc" style="display:none;"></div>
 
         <div id="errorBanner" class="error-banner"></div>
 
@@ -145,6 +144,12 @@ You are an expert chef. Suggest three dinner recipes that are quick to make, use
           Phrase Saliency Map
           <span class="panel-hint" id="phraseCount"></span>
         </div>
+        <div class="legend-row">
+          <span class="legend-label">Impact</span>
+          <span class="legend-low">Low</span>
+          <div class="legend-bar"></div>
+          <span class="legend-high">High</span>
+        </div>
         <div class="progress-wrap" id="progressWrap">
           <div class="progress-bar" id="progressBar"></div>
         </div>
@@ -152,16 +157,9 @@ You are an expert chef. Suggest three dinner recipes that are quick to make, use
         <div id="saliencyText" class="saliency-text">
           <div class="empty-state">
             <div class="empty-icon">◎</div>
-            <p>Your prompt will appear here, colour-coded by phrase importance.<br/>Red = high impact &nbsp;·&nbsp; Blue = low impact.</p>
+            <p>Run an analysis to see your prompt colour-coded by phrase impact.</p>
           </div>
         </div>
-      </div>
-
-      <div class="legend-row">
-        <span class="legend-label">Impact</span>
-        <span class="legend-low">Low</span>
-        <div class="legend-bar"></div>
-        <span class="legend-high">High</span>
       </div>
 
       <div class="stats-row" id="statsRow" style="display:none;">
@@ -190,6 +188,6 @@ You are an expert chef. Suggest three dinner recipes that are quick to make, use
     </section>
   </main>
 
-  <script src="app.js?v=8"></script>
+  <script src="app.js?v=11"></script>
 </body>
 </html>

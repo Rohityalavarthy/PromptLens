@@ -183,20 +183,13 @@ function selectSimilarity(btn) {
   document.querySelectorAll('.sim-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   selectedSimilarity = btn.dataset.sim;
-  document.getElementById('simDesc').textContent = SIM_DESCRIPTIONS[selectedSimilarity];
 }
 
 /** Show/hide the similarity selector depending on whether a Together AI key exists. */
 function updateSimilaritySelector() {
   const hasTogetherKey = !!getKey('together');
-  const show = hasTogetherKey ? 'flex' : 'none';
-  document.getElementById('similarityRow').style.display = show;
-  document.getElementById('simDesc').style.display = hasTogetherKey ? 'block' : 'none';
-  if (!hasTogetherKey) {
-    selectedSimilarity = SimilarityStrategy.TRIGRAM;
-  } else {
-    document.getElementById('simDesc').textContent = SIM_DESCRIPTIONS[selectedSimilarity];
-  }
+  document.getElementById('similarityRow').style.display = hasTogetherKey ? 'flex' : 'none';
+  if (!hasTogetherKey) selectedSimilarity = SimilarityStrategy.TRIGRAM;
 }
 
 // ─── Analysis target selector ─────────────────────────────────────────────────
@@ -207,12 +200,12 @@ function updateSimilaritySelector() {
  */
 const PLACEHOLDERS = {
   user: {
-    analyzed: 'Enter the user prompt to analyze. Each phrase will be colour-coded by impact.\n\nExample:\nSuggest three dinner recipes that are quick to make.',
-    context:  'Optional system prompt — held constant during analysis...',
+    analyzed: 'Paste your prompt here — each phrase will be colour-coded by how much it shapes the model output.\n\nExample:\nYou are an expert chef. Suggest three dinner recipes that are quick to make, use chicken, and are suitable for a family of four.',
+    context:  'Held constant during analysis — use something representative of real usage.',
   },
   system: {
-    analyzed: 'Enter the system prompt to analyze. Each phrase will be colour-coded by impact.\n\nExample:\nYou are an expert chef. Always respond in a friendly tone. Focus on healthy ingredients.',
-    context:  'Fixed user message held constant during analysis.\n\nExample:\nSuggest three dinner recipes for a family of four.',
+    analyzed: 'Paste your system prompt here — each instruction phrase will be scored by how much it influences model behaviour.\n\nExample:\nYou are an expert chef. Always respond in a friendly tone. Focus on healthy, seasonal ingredients.',
+    context:  'User message — held constant during all coalition walks. Use something representative of real usage.',
   },
 };
 
@@ -225,11 +218,29 @@ function selectTarget(btn) {
 
   const analyzingUser = analysisTarget === 'user';
 
-  // Labels are fixed to their textareas — only the badge changes
+  // Labels are fixed to their textareas — only the badge and dimming changes
   document.getElementById('primaryLabel').innerHTML =
     `User Prompt ${analyzingUser ? '<span class="target-badge">Analyzed</span>' : '<span class="optional">(held constant)</span>'}`;
   document.getElementById('secondaryLabel').innerHTML =
     `System Prompt ${analyzingUser ? '<span class="optional">(held constant)</span>' : '<span class="target-badge">Analyzed</span>'}`;
+
+  // Swap visual hierarchy: analyzed textarea is tall/prominent, context is short/dimmed
+  const promptTA  = document.getElementById('prompt');
+  const systemTA  = document.getElementById('systemprompt');
+  const primaryLbl   = document.getElementById('primaryLabel');
+  const secondaryLbl = document.getElementById('secondaryLabel');
+
+  if (analyzingUser) {
+    promptTA.classList.replace('textarea--secondary', 'textarea--primary');
+    systemTA.classList.replace('textarea--primary',   'textarea--secondary');
+    primaryLbl.classList.remove('field-label--secondary');
+    secondaryLbl.classList.add('field-label--secondary');
+  } else {
+    promptTA.classList.replace('textarea--primary',   'textarea--secondary');
+    systemTA.classList.replace('textarea--secondary', 'textarea--primary');
+    primaryLbl.classList.add('field-label--secondary');
+    secondaryLbl.classList.remove('field-label--secondary');
+  }
 
   // Update placeholders
   document.getElementById('prompt').placeholder = analyzingUser
