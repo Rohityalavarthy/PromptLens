@@ -71,28 +71,20 @@
       </div>
       <div class="panel-body">
 
-        <!-- Analysis target toggle -->
-        <div class="target-toggle-row">
-          <div class="target-toggle">
-            <button class="target-btn active" data-target="user" onclick="selectTarget(this)">User Prompt</button>
-            <button class="target-btn" data-target="system" onclick="selectTarget(this)">System Prompt</button>
-          </div>
-        </div>
-
-        <!-- User prompt — always #prompt, always top -->
-        <label class="field-label" id="primaryLabel" for="prompt" style="margin-top:18px;">User Prompt <span class="target-badge">Analyzed</span></label>
+        <!-- System prompt — always analyzed -->
+        <label class="field-label" for="systemprompt">System Prompt <span class="target-badge">Analyzed</span></label>
         <textarea
-          id="prompt"
+          id="systemprompt"
           class="textarea--primary"
-          placeholder="Paste your prompt here — each phrase will be colour-coded by how much it shapes the model output.
+          placeholder="Paste your system prompt here — each instruction phrase will be scored by how much it shapes the model's behaviour.
 
 Example:
-You are an expert chef. Suggest three dinner recipes that are quick to make, use chicken, and are suitable for a family of four."
+You are an expert chef. Always respond in a friendly tone. Focus on healthy, seasonal ingredients."
         ></textarea>
 
-        <!-- System prompt — always #systemprompt, always bottom -->
-        <label class="field-label field-label--secondary" id="secondaryLabel" for="systemprompt" style="margin-top:16px;">System Prompt <span class="optional">(held constant)</span></label>
-        <textarea id="systemprompt" class="textarea--secondary" placeholder="Held constant during analysis — use something representative of real usage."></textarea>
+        <!-- User message — test input, held constant -->
+        <label class="field-label field-label--secondary" for="prompt" style="margin-top:16px;">Test Input <span class="optional">(held constant)</span></label>
+        <textarea id="prompt" class="textarea--secondary" placeholder="A representative user message — held constant while each system prompt phrase is evaluated."></textarea>
 
         <div class="settings-divider">Analysis Settings</div>
 
@@ -188,6 +180,6 @@ You are an expert chef. Suggest three dinner recipes that are quick to make, use
     </section>
   </main>
 
-  <script src="app.js?v=11"></script>
+  <script src="app.js?v=12"></script>
 </body>
 </html>
