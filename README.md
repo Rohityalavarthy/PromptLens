@@ -37,7 +37,7 @@ The three classic perturbation methods (Perturbation, Leave-One-Out, Paraphrase)
 
 Shapley values solve this correctly. The Shapley value for a phrase is its **average marginal contribution across all possible coalitions of other phrases** — the only attribution method that satisfies all fairness axioms when features interact.
 
-Since exact computation requires 2^N model calls, PromptLens uses **Monte Carlo sampling**: M random coalition walks are run in parallel (concurrency cap 5), each walk recording the marginal contribution of each phrase as it's added to a growing coalition. M=20 walks gives a statistically stable estimate in roughly 20×N model calls.
+Since exact computation requires 2^N model calls (N signifies number of phrases), PromptLens uses **Monte Carlo sampling**: M random coalition walks are run in parallel (concurrency cap 5), each walk recording the marginal contribution of each phrase as it's added to a growing coalition. M=20 walks gives a statistically stable estimate in roughly 20×N model calls.
 
 For short prompts (N ≤ 4) exact Shapley is computed instead — all N! permutations share a coalition cache, so actual API calls stay well under 2^N.
 
