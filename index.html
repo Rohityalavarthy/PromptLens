@@ -98,15 +98,33 @@ You are an expert chef. Suggest three dinner recipes that are quick to make, use
         <div class="method-row">
           <label class="field-label" style="margin:0; white-space:nowrap;">Saliency Method</label>
           <div class="method-group">
-            <button class="method-btn active" data-method="perturbation" onclick="selectMethod(this)" title="Replaces each phrase with [...] and measures output divergence">Perturbation</button>
-            <button class="method-btn" data-method="omission" onclick="selectMethod(this)" title="Removes each phrase entirely and measures output divergence">Leave-One-Out</button>
-            <button class="method-btn" data-method="paraphrase" onclick="selectMethod(this)" title="Rewrites each phrase to be vague, then measures output divergence">Paraphrase</button>
+            <span class="method-badge">Shapley Attribution</span>
+            <button class="advanced-toggle" onclick="toggleAdvanced()">Advanced ▾</button>
           </div>
         </div>
 
         <div id="methodDesc" class="method-desc">
-          Replaces each phrase with <code>[...]</code> and measures how much the model output changes. Fast and reliable for most prompts.
+          Tests each phrase across all possible combinations of other phrases and averages its contribution — the only attribution method that correctly handles phrase interactions.
         </div>
+
+        <div class="advanced-row" id="advancedRow" style="display:none;">
+          <label class="field-label" style="margin:0; white-space:nowrap; font-size:12px;">Samples</label>
+          <div class="method-group">
+            <button class="method-btn" data-m="10" onclick="selectShapleyM(this)">Fast (10)</button>
+            <button class="method-btn active" data-m="20" onclick="selectShapleyM(this)">Balanced (20)</button>
+            <button class="method-btn" data-m="50" onclick="selectShapleyM(this)">Precise (50)</button>
+          </div>
+        </div>
+
+        <div class="method-row" id="similarityRow" style="display:none;">
+          <label class="field-label" style="margin:0; white-space:nowrap;">Similarity</label>
+          <div class="method-group">
+            <button class="method-btn sim-btn" data-sim="trigram" onclick="selectSimilarity(this)">Standard</button>
+            <button class="method-btn sim-btn active" data-sim="semantic" onclick="selectSimilarity(this)">Semantic</button>
+          </div>
+        </div>
+
+        <div id="simDesc" class="method-desc" style="display:none;"></div>
 
         <div id="errorBanner" class="error-banner"></div>
 
@@ -172,6 +190,6 @@ You are an expert chef. Suggest three dinner recipes that are quick to make, use
     </section>
   </main>
 
-  <script src="app.js?v=5"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>

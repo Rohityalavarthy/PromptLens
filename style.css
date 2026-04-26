@@ -285,6 +285,47 @@ textarea::placeholder { color: var(--text-dimmer); }
   font-size: 10.5px;
 }
 
+/* Shapley badge — non-interactive label in the method row */
+.method-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* Advanced toggle button */
+.advanced-toggle {
+  background: transparent;
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.6px;
+  padding: 7px 10px;
+  cursor: pointer;
+  transition: all 0.14s;
+  white-space: nowrap;
+}
+.advanced-toggle:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Advanced presets row */
+.advanced-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
 /* ─── Error banner ────────────────────────────────────── */
 .error-banner {
   display: none;
