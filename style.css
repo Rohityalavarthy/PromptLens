@@ -154,42 +154,6 @@ main {
 .panel-body { padding: 20px; }
 
 /* ─── Form elements ───────────────────────────────────── */
-/* ─── Analysis target toggle ──────────────────────────────────────────── */
-.target-toggle-row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.target-toggle {
-  display: flex;
-  background: var(--bg);
-  border: 1px solid var(--border-bright);
-  border-radius: var(--radius);
-  padding: 3px;
-  gap: 3px;
-}
-
-.target-btn {
-  flex: 1;
-  padding: 6px 14px;
-  background: transparent;
-  border: none;
-  border-radius: 2px;
-  color: var(--text-dim);
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.6px;
-  cursor: pointer;
-  transition: all 0.14s;
-  white-space: nowrap;
-}
-.target-btn:hover { color: var(--text); }
-.target-btn.active {
-  background: var(--accent);
-  color: #000;
-  font-weight: 500;
-}
 
 .target-badge {
   display: inline-block;

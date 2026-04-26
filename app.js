@@ -65,7 +65,6 @@ const SIM_DESCRIPTIONS = {
 
 let shapleyM           = 20;
 let selectedProvider   = localStorage.getItem('promptlens_provider') || 'groq';
-let analysisTarget     = 'user';   // 'user' | 'system'
 let selectedSimilarity = SimilarityStrategy.SEMANTIC;
 
 // ─── Provider & key management ────────────────────────────────────────────────
@@ -192,64 +191,6 @@ function updateSimilaritySelector() {
   if (!hasTogetherKey) selectedSimilarity = SimilarityStrategy.TRIGRAM;
 }
 
-// ─── Analysis target selector ─────────────────────────────────────────────────
-
-/**
- * Switch which prompt (user or system) is the analysis subject.
- * The other becomes the fixed context, held constant during perturbation.
- */
-const PLACEHOLDERS = {
-  user: {
-    analyzed: 'Paste your prompt here — each phrase will be colour-coded by how much it shapes the model output.\n\nExample:\nYou are an expert chef. Suggest three dinner recipes that are quick to make, use chicken, and are suitable for a family of four.',
-    context:  'Held constant during analysis — use something representative of real usage.',
-  },
-  system: {
-    analyzed: 'Paste your system prompt here — each instruction phrase will be scored by how much it influences model behaviour.\n\nExample:\nYou are an expert chef. Always respond in a friendly tone. Focus on healthy, seasonal ingredients.',
-    context:  'User message — held constant during all coalition walks. Use something representative of real usage.',
-  },
-};
-
-function selectTarget(btn) {
-  if (btn.dataset.target === analysisTarget) return;
-
-  document.querySelectorAll('.target-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  analysisTarget = btn.dataset.target;
-
-  const analyzingUser = analysisTarget === 'user';
-
-  // Labels are fixed to their textareas — only the badge and dimming changes
-  document.getElementById('primaryLabel').innerHTML =
-    `User Prompt ${analyzingUser ? '<span class="target-badge">Analyzed</span>' : '<span class="optional">(held constant)</span>'}`;
-  document.getElementById('secondaryLabel').innerHTML =
-    `System Prompt ${analyzingUser ? '<span class="optional">(held constant)</span>' : '<span class="target-badge">Analyzed</span>'}`;
-
-  // Swap visual hierarchy: analyzed textarea is tall/prominent, context is short/dimmed
-  const promptTA  = document.getElementById('prompt');
-  const systemTA  = document.getElementById('systemprompt');
-  const primaryLbl   = document.getElementById('primaryLabel');
-  const secondaryLbl = document.getElementById('secondaryLabel');
-
-  if (analyzingUser) {
-    promptTA.classList.replace('textarea--secondary', 'textarea--primary');
-    systemTA.classList.replace('textarea--primary',   'textarea--secondary');
-    primaryLbl.classList.remove('field-label--secondary');
-    secondaryLbl.classList.add('field-label--secondary');
-  } else {
-    promptTA.classList.replace('textarea--primary',   'textarea--secondary');
-    systemTA.classList.replace('textarea--secondary', 'textarea--primary');
-    primaryLbl.classList.add('field-label--secondary');
-    secondaryLbl.classList.remove('field-label--secondary');
-  }
-
-  // Update placeholders
-  document.getElementById('prompt').placeholder = analyzingUser
-    ? PLACEHOLDERS.user.analyzed
-    : PLACEHOLDERS.system.context;
-  document.getElementById('systemprompt').placeholder = analyzingUser
-    ? PLACEHOLDERS.user.context
-    : PLACEHOLDERS.system.analyzed;
-}
 
 
 
@@ -885,25 +826,17 @@ function setRunning(running) {
 // ─── Main analysis ────────────────────────────────────────────────────────────
 
 async function runAnalysis() {
-  // Always read by stable semantic ID — #prompt is the user message,
-  // #systemprompt is the system message, regardless of which is visually on top.
-  const userText   = document.getElementById('prompt').value.trim();
+  // #systemprompt is always the analysis subject; #prompt is the held-constant test input.
   const systemText = document.getElementById('systemprompt').value.trim();
+  const userText   = document.getElementById('prompt').value.trim();
 
-  // analysisTarget tells us which one to tokenize and perturb.
-  // The other is passed through unchanged as fixed context.
-  const analyzingUser = analysisTarget === 'user';
-  const primaryText   = analyzingUser ? userText   : systemText;
-  const contextText   = analyzingUser ? systemText : userText;
+  const primaryText = systemText;
+  const contextText = userText;
 
-  // buildCall always puts text in the correct API role:
-  //   user message  → messages[].role === 'user'
-  //   system message → messages[].role === 'system'
-  // When analyzing the user prompt:   perturb userMsg, keep systemMsg fixed
-  // When analyzing the system prompt: perturb systemMsg, keep userMsg fixed
+  // System prompt is perturbed; user message is held constant as context.
   const buildCall = (analyzedText) => ({
-    userMsg:   analyzingUser ? analyzedText : contextText,
-    systemMsg: analyzingUser ? contextText  : analyzedText,
+    userMsg:   contextText,
+    systemMsg: analyzedText,
   });
 
   hideError();
@@ -913,8 +846,7 @@ async function runAnalysis() {
     return;
   }
   if (!primaryText) {
-    const label = analyzingUser ? 'user prompt' : 'system prompt';
-    showError(`Please enter a ${label} to analyze.`);
+    showError('Please enter a system prompt to analyze.');
     return;
   }
 
