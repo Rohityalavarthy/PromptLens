@@ -15,9 +15,6 @@ PromptLens/
 └── agent/        CLI tool — discovers prompts in a codebase, audits and compresses them
 ```
 
-<img width="1414" height="810" alt="Screenshot 2026-04-26 at 8 51 39 PM" src="https://github.com/user-attachments/assets/ee13a2b0-1ee8-450b-8196-566ac70064b7" />
-
-
 ---
 
 ## Web Tool
