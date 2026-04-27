@@ -1,153 +1,231 @@
 # PromptLens
 
-A browser-based saliency debugger for prompt engineers and developers building LLM applications. Paste a prompt, run the analysis, and get your prompt back colour-coded by how much each phrase actually influences the model output.
+Shapley-value attribution for LLM prompts. Tells you which phrases in your system prompt are load-bearing and which are dead weight — with empirical evidence, not guesswork.
 
-Built this because I kept iterating on prompts with no real signal on what was doing work and what wasn't. Most debugging is just vibes - this makes it measurable.
-
-**Run it directly at:** https://rohityalavarthy.github.io/PromptLens
+**Live web tool:** https://rohityalavarthy.github.io/PromptLens
 
 ---
 
-## What it does
+## What's in this repo
 
-PromptLens runs a Shapley attribution analysis on your prompt. It splits the prompt into phrases, then measures each phrase's contribution by testing it in combination with every possible subset of the other phrases — not just in isolation. The result is your original prompt rendered as colour-coded text - blue for low impact, red for high impact - with exact percentage scores on hover.
+```
+PromptLens/
+├── web/          Browser-based saliency debugger (no install, paste and run)
+├── sdk/python/   Python SDK — core Shapley engine, importable in your own code
+└── agent/        CLI tool — discovers prompts in a codebase, audits and compresses them
+```
 
-You can analyze either the **user prompt** or the **system prompt**, which makes it useful both for end-user prompt engineering and for developers tuning system prompts in production applications.
-
-![PromptLens screenshot](assets/view.png)
-
----
-
-## How it works
-
-### 1. Structure-aware segmentation
-
-The prompt is classified into structural regions first — plain prose, JSON, XML tags, bullet lists, fenced code blocks, markdown sections — then each region is segmented by its own rules. Plain text splits at sentence and clause boundaries. JSON splits per top-level key. XML splits per outermost tag. Bullets split per item. Code blocks and markdown headers are kept atomic.
-
-This gives phrase-level granularity that respects the structure of the prompt rather than blindly splitting on punctuation.
-
-### 2. Baseline generation
-
-The full unmodified prompt is sent to the model once to get a reference output. All subsequent comparisons are made against this baseline.
-
-### 3. Shapley attribution
-
-The three classic perturbation methods (Perturbation, Leave-One-Out, Paraphrase) all share the same flaw: they test each phrase in isolation, which misses interactions between phrases. A phrase can look low-impact on its own but be essential in combination with others.
-
-Shapley values solve this correctly. The Shapley value for a phrase is its **average marginal contribution across all possible coalitions of other phrases** — the only attribution method that satisfies all fairness axioms when features interact.
-
-Since exact computation requires 2^N model calls, PromptLens uses **Monte Carlo sampling**: M random coalition walks are run in parallel (concurrency cap 5), each walk recording the marginal contribution of each phrase as it's added to a growing coalition. M=20 walks gives a statistically stable estimate in roughly 20×N model calls.
-
-For short prompts (N ≤ 4) exact Shapley is computed instead — all N! permutations share a coalition cache, so actual API calls stay well under 2^N.
-
-**API call budget:**
-
-| Prompt size | Walks | Est. model calls |
-|---|---|---|
-| N ≤ 4 | All N! permutations (exact) | ≤ 16 (cached) |
-| N = 10, M = 20 | 20 | ~20–40 (with cache hits) |
-| N = 10, M = 50 | 50 | ~50–80 (with cache hits) |
-
-The sample count is configurable via the **Advanced** panel: Fast (10), Balanced (20), Precise (50).
-
-### 4. Divergence measurement
-
-Two modes are available:
-
-**Standard** — character trigram cosine similarity. Overlapping 3-character substrings are extracted from both outputs, frequency vectors are built, and cosine distance is computed. Language-agnostic, no extra API calls, sensitive to surface-level rewording.
-
-**Semantic** — embedding cosine distance via `nomic-ai/nomic-embed-text-v1.5`. Each pair of adjacent-step outputs in a Shapley walk is embedded and compared in vector space. Captures meaning-level change rather than surface change — a phrase that causes the model to say the same thing differently scores low rather than high. Requires a Together AI key.
-
-### 5. Normalisation and rendering
-
-Raw Shapley scores are min-max normalised across all phrases so the full colour range is always used. Each phrase is rendered as an inline span with a background interpolated across a 5-stop gradient (dark blue → cyan → amber → orange → red). Hovering any phrase shows its exact impact percentage.
+All three share the same attribution engine. The web tool is the interactive version; the SDK and CLI are for integrating into development workflows.
 
 ---
 
-## Analyzing system prompts
+## Web Tool
 
-The toggle at the top of the input panel switches between analyzing the user prompt and the system prompt. Whichever is selected gets the saliency treatment; the other is held constant as context throughout all coalition walks.
+Paste a system prompt, run the analysis, get your prompt back colour-coded by how much each phrase actually influences the model output. Blue = low impact, red = high impact.
 
-This is the main reason I built support for system prompt analysis rather than keeping it user-prompt-only - if you're a developer shipping an LLM feature, your system prompt is where most of the complexity lives and it's exactly what you want to be able to debug.
+**Run directly at:** https://rohityalavarthy.github.io/PromptLens
 
-When analyzing the system prompt, make sure to fill in a representative user message in the lower field. The quality of the saliency signal depends on having a realistic user turn for the model to respond to.
-
----
-
-## Getting started
-
-No build step, no dependencies, no backend. It's three files.
-
-### Run locally
-
+**Run locally:**
 ```bash
-git clone https://github.com/Rohityalavarthy/PromptLens.git
-cd PromptLens
+cd web
 python3 -m http.server 8080
 # open http://localhost:8080
 ```
 
-You'll see a 404 for `/favicon.ico` in the server logs - that's just the browser looking for a tab icon, it's harmless.
+No build step. No dependencies. Just three files.
 
-### Deploy to GitHub Pages
+### How it works
+
+1. **Segmentation** — The prompt is classified into structural regions (plain prose, JSON, XML, bullets, code blocks, markdown) then split by region-appropriate rules. Plain text splits at sentence/clause boundaries; JSON splits per top-level key; XML per tag pair; bullets per item; code blocks and headers stay atomic.
+
+2. **Shapley attribution** — Each phrase's score is its average marginal contribution across all possible coalitions of other phrases. This correctly handles phrase interactions (a phrase can look useless in isolation but be essential in combination). For N ≤ 4 phrases: exact Shapley. For N > 4: Monte Carlo sampling with M random coalition walks (default M=20, concurrency cap 5). Coalition outputs are cached so repeated subsets don't duplicate API calls.
+
+3. **Divergence measurement** — Standard mode: character trigram cosine distance, no extra API calls. Semantic mode: embedding cosine via `nomic-ai/nomic-embed-text-v1.5` (Together AI key required). Semantic mode captures meaning-level change rather than surface rewording.
+
+4. **Rendering** — Raw Shapley scores are min-max normalised, then each phrase is rendered as an inline span coloured across a 5-stop gradient. Hover any phrase for its exact impact percentage.
+
+### API keys
+
+Keys are stored in `localStorage` — they never leave your browser.
+
+| Provider | Model | Notes |
+|---|---|---|
+| Groq | `llama-3.3-70b-versatile` | Recommended for Standard mode. Free tier, no credit card. |
+| Together AI | `meta-llama/Llama-3.3-70B-Instruct-Turbo` | Required for Semantic mode. $1 free credit. |
+
+---
+
+## Python SDK
 
 ```bash
-git init
-git add .
-git commit -m "initial commit"
-git remote add origin https://github.com/Rohityalavarthy/PromptLens.git
-git push -u origin main
+pip install -e sdk/python
 ```
 
-Then go to **Settings → Pages → Source** and set it to `main` branch, root folder. GitHub will give you a live URL within about a minute. No config needed - it's a static site.
+Requires Python 3.11+. Single dependency: `aiohttp`.
+
+```python
+import asyncio
+from promptlens import run_shapley, SimilarityMode
+
+report = asyncio.run(run_shapley(
+    prompt="You are a helpful assistant. Always respond concisely. Use bullet points when listing items.",
+    test_inputs=["What are the benefits of exercise?"],
+    m_samples=20,
+    mode=SimilarityMode.STANDARD,
+))
+
+for score in sorted(report.scores, key=lambda s: s.score, reverse=True):
+    print(f"{score.score:.2f}  {score.phrase.text}")
+```
+
+```
+0.91  Always respond concisely.
+0.54  Use bullet points when listing items.
+0.12  You are a helpful assistant.
+```
+
+### API
+
+```python
+run_shapley(
+    prompt: str,
+    test_inputs: list[str],
+    m_samples: int = 20,           # 3=fast, 20=balanced, 50=precise
+    mode: SimilarityMode = STANDARD,
+    low_saliency_threshold: float = 0.15,
+) -> SaliencyReport
+```
+
+```python
+segment_prompt(prompt: str) -> list[Phrase]
+```
+
+**`SaliencyReport`** fields:
+- `phrases` — segmented phrase list
+- `scores` — `SaliencyScore` per phrase: `.score` (0–1 normalised), `.raw_shapley`, `.disposition` (keep/remove)
+- `token_count`, `redundancy_fraction`, `compression_candidate_tokens`
+- `confidence`, `m_samples`, `test_inputs_used`
+
+Set `TOGETHER_API_KEY` in your environment. The SDK calls Together AI for all LLM and embedding calls.
 
 ---
 
-## API keys
+## CLI Agent
 
-PromptLens supports two providers. Keys are stored in `localStorage` and never leave your browser - every request goes directly from your browser to the provider's API.
+Finds LLM prompts in a Python codebase via AST analysis, runs Shapley attribution on each, and optionally compresses bloated prompts with empirical validation.
 
-### Groq - recommended for Standard mode
+### Install
 
-Runs `llama-3.3-70b-versatile`. Fastest inference of any free API available, very generous rate limits.
+```bash
+pip install -e sdk/python    # install SDK first
+pip install -e agent
+export TOGETHER_API_KEY=your_key_here
+```
 
-1. Sign up at [console.groq.com](https://console.groq.com/keys) - no credit card required
-2. Create an API key (starts with `gsk_`)
-3. Paste it into the key modal in PromptLens
+### Commands
 
-Free tier: ~30 requests/min. A Balanced (M=20) Shapley run on a 10-phrase prompt uses roughly 20–40 calls with cache hits.
+#### `check` — fast pre-commit scan
 
-### Together AI - required for Semantic mode
+```bash
+promptlens check --file src/prompts/system.txt
+```
 
-Runs `meta-llama/Llama-3.3-70B-Instruct-Turbo` for generation and `nomic-ai/nomic-embed-text-v1.5` for embeddings. A Together AI key is required to unlock Semantic similarity mode.
+M=3 samples. Prints a phrase-level saliency table and warns if redundancy exceeds 20%. Fast enough to run before every commit.
 
-1. Sign up at [api.together.ai](https://api.together.ai/settings/api-keys) - comes with $1 free credit, no credit card
-2. Create an API key and paste it in
+#### `audit` — full repo audit
 
-Once a Together AI key is saved, the Similarity selector appears and defaults to Semantic mode.
+```bash
+# Scan entire repo for LLM API calls
+promptlens audit --repo .
+
+# Single file, full analysis
+promptlens audit --file src/prompts/system.txt --m-samples 20
+
+# With your own test inputs
+promptlens audit --file src/prompts/system.txt --test-inputs tests/inputs.jsonl
+
+# Semantic similarity mode
+promptlens audit --file src/prompts/system.txt --semantic
+```
+
+Discovers prompts by walking `.py` files and detecting `openai.chat.completions.create`, `anthropic.messages.create`, LangChain, and Bedrock call signatures. Extracts system prompts from literal strings, variable assignments, and file reads.
+
+#### `compress` — analyse, rewrite, validate
+
+```bash
+promptlens compress --file src/prompts/system.txt
+promptlens compress --file src/prompts/system.txt --threshold 0.12 --semantic
+```
+
+Full pipeline:
+1. Run Shapley analysis to identify low-saliency phrases
+2. Label each phrase KEEP or COMPRESS, send to LLM rewriter
+3. Rewriter applies REMOVE / MERGE / REWRITE per phrase, keeping high-saliency phrases word-for-word
+4. Validate compressed prompt against original: run both against all test inputs, compare divergence
+5. If divergence exceeds threshold, reinstate the offending phrase and retry (up to 3 times)
+6. Write result to `<file>.suggested` — original is never overwritten
+
+```bash
+diff src/prompts/system.txt src/prompts/system.txt.suggested
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--threshold` | `0.15` | Max output divergence allowed |
+| `--m-samples` | `20` | Monte Carlo walks for Shapley |
+| `--semantic` | off | Use embedding similarity instead of trigram |
+| `--test-inputs` | — | `.jsonl` (`{"input": "..."}`) or `.txt` (one per line) |
+
+If no `--test-inputs` file is provided, the agent uses three generic fallback inputs. For production use, provide representative inputs — the quality of the saliency signal depends on having realistic test cases.
 
 ---
 
-## File structure
+## How attribution works
 
-```
-promptlens/
-├── index.html    # markup and layout
-├── style.css     # all styles, CSS custom properties for theming
-├── app.js        # segmentation, Shapley attribution, API calls, rendering
-└── README.md
-```
+The three classic perturbation methods (Leave-One-Out, Perturbation, Paraphrase) all test phrases in isolation, which misses interactions. A phrase can look low-impact alone but be essential in combination with others.
 
-`app.js` is organized into clearly commented sections: provider config → state → key management → method/target selection → LLM call → segmentation → similarity → Shapley attribution → normalisation → colour mapping → rendering → main analysis runner.
+Shapley values fix this. The Shapley value for a phrase is its **average marginal contribution across all possible coalitions of the other phrases** — the only attribution method satisfying all fairness axioms when features interact.
+
+**API call budget:**
+
+| Prompt size | Mode | Est. model calls |
+|---|---|---|
+| N ≤ 4 | Exact (all N! permutations) | ≤ 16 (with cache) |
+| N = 10, M = 20 | Monte Carlo | ~20–40 (with cache hits) |
+| N = 10, M = 50 | Monte Carlo | ~50–80 (with cache hits) |
+
+Coalition outputs are cached by subset key. Concurrent walks that hit the same coalition share a single in-flight API call.
+
+`temperature: 0.0` on all generation calls — determinism is essential for stable divergence measurement.
 
 ---
 
-## Future Roadmap
+## Development
+
+```bash
+# SDK tests
+cd sdk/python && pytest tests/ -v
+
+# Agent tests
+cd agent && pytest tests/ -v
+```
+
+Tests cover: segmenter (plain text, JSON, bullets, XML, code blocks, mixed), Shapley pure logic (prompt reconstruction, coalition cache), trigram similarity, and AST prompt discovery.
+
+No live API calls in the test suite — all tests are offline.
+
+---
+
+## Roadmap
 
 - [ ] Export saliency map as image
 - [ ] Side-by-side diff of two prompt variants
-- [ ] Batch mode - run the same analysis across multiple test inputs and aggregate scores
-- [ ] OpenAI and Anthropic key support
+- [ ] Batch mode across multiple test inputs with aggregated scores
+- [ ] OpenAI and Anthropic provider support (web tool)
+- [ ] GitHub Action for CI integration
+- [ ] Pre-commit hook
 
 ---
 
