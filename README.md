@@ -15,7 +15,8 @@ PromptLens/
 └── agent/        CLI tool — discovers prompts in a codebase, audits and compresses them
 ```
 
-All three share the same attribution engine. The web tool is the interactive version; the SDK and CLI are for integrating into development workflows.
+<img width="1414" height="810" alt="Screenshot 2026-04-26 at 8 51 39 PM" src="https://github.com/user-attachments/assets/ee13a2b0-1ee8-450b-8196-566ac70064b7" />
+
 
 ---
 
@@ -42,7 +43,7 @@ No build step. No dependencies. Just three files.
 
 3. **Divergence measurement** — Standard mode: character trigram cosine distance, no extra API calls. Semantic mode: embedding cosine via `nomic-ai/nomic-embed-text-v1.5` (Together AI key required). Semantic mode captures meaning-level change rather than surface rewording.
 
-4. **Rendering** — Raw Shapley scores are min-max normalised, then each phrase is rendered as an inline span coloured across a 5-stop gradient. Hover any phrase for its exact impact percentage.
+Since exact computation requires 2^N model calls (N signifies number of phrases), PromptLens uses **Monte Carlo sampling**: M random coalition walks are run in parallel (concurrency cap 5), each walk recording the marginal contribution of each phrase as it's added to a growing coalition. M=20 walks gives a statistically stable estimate in roughly 20×N model calls.
 
 ### API keys
 
@@ -220,12 +221,10 @@ No live API calls in the test suite — all tests are offline.
 
 ## Roadmap
 
-- [ ] Export saliency map as image
-- [ ] Side-by-side diff of two prompt variants
-- [ ] Batch mode across multiple test inputs with aggregated scores
-- [ ] OpenAI and Anthropic provider support (web tool)
-- [ ] GitHub Action for CI integration
-- [ ] Pre-commit hook
+- [ ] Extend capabilities to a comprehensive agent - deployable via Github Apps
+- [ ] Extend further to be a VSC extension
+- [ ] Batch mode - run the same analysis across multiple test inputs and aggregate scores
+- [ ] OpenAI and Anthropic key support
 
 ---
 

@@ -97,21 +97,22 @@ agent/
 
 Data flow: `runAnalysis()` → `segmentPrompt()` → baseline call → `computeShapley()` → `normalise()` → `renderSaliency()` → `renderStats()`
 
-Key decisions:
-- `#systemprompt` is always the analysis subject (top, `.textarea--primary`). `#prompt` is always the held-constant test input (bottom, `.textarea--secondary`). No toggle — this is fixed.
-- `buildCall(analyzedText)` always returns `{ userMsg: contextText, systemMsg: analyzedText }`.
-- Coalition cache stores Promises (not resolved values) — concurrent walks sharing a coalition share one in-flight API call.
-- Absent XML phrases in a coalition are replaced with `<tag>[...]</tag>`; absent plain phrases are omitted.
-- CSS tooltips on similarity buttons use `[data-tooltip]::after` — no JS needed.
-- Both `style.css` and `app.js` are cache-busted via `?v=N` query strings in `index.html`. Increment N when deploying changes.
+1. **Provider config** — `PROVIDERS` object holds Groq and Together AI endpoints, model IDs, `localStorage` keys, and key-format validation hints. Both providers use the OpenAI-compatible `/v1/chat/completions` format, so `callLLM()` is identical for both. Together AI also provides embeddings via `/v1/embeddings` using `nomic-ai/nomic-embed-text-v1.5`.
+2. **State** — three mutable globals: `shapleyM` (sample count, default 20), `selectedProvider`, `analysisTarget` (`'user'|'system'`), `selectedSimilarity`. API keys are stored in `localStorage`, never in JS state.
+3. **`runAnalysis()`** — the main orchestrator. Reads `#prompt` and `#systemprompt`, decides which is the analysis subject via `analysisTarget`, calls `segmentPrompt()`, gets a baseline response, calls `computeShapley()`, then `normalise()` → `renderSaliency()` → `renderStats()`.
+4. **Segmentation** — classify-then-segment pipeline. `detectRegions()` scans the prompt line-by-line and classifies it into typed regions (`plain`, `code_block`, `json`, `bullets`, `xml_tagged`, `markdown`). Each region is passed to a dedicated segmenter returning `Phrase[]` objects `{ text, atomic, tagName?, content? }`.
+5. **Shapley Attribution** — `computeShapley()` is the saliency engine. For N ≤ 4 phrases it computes exact Shapley values (all N! permutations). For N > 4 it uses Monte Carlo sampling with `shapleyM` random walks, concurrency-capped at 5 via `withConcurrency()`. Each walk calls `sampleShapleyWalk()` which incrementally builds a coalition and records each phrase's marginal contribution. A coalition cache (`makeCoalitionRunner()`) deduplicates repeated subset API calls across walks.
+6. **Similarity modes** — controlled by `selectedSimilarity`. Standard: `1 - cosineSim(a, b)` (character trigram). Semantic: `1 - vecCosineSim(embed(a), embed(b))` (embedding cosine via Together AI — no LLM judge in Shapley). Semantic mode requires a Together AI key; the similarity selector is hidden until one is saved.
+7. **`scoreToBackground()`** — maps a normalised [0,1] score to an RGBA colour via 5-stop gradient interpolation (dark-blue → cyan → amber → orange → red).
 
 ### Python SDK (`sdk/python/promptlens/`)
 
-- **`generator.py`** — all API calls go to Together AI. Models: `meta-llama/Llama-3.3-70B-Instruct-Turbo` (generation), `togethercomputer/m2-bert-80M-8k-retrieval` (embeddings), `Qwen/Qwen2.5-72B-Instruct-Turbo` (judge — different family for independence). `get_api_key()` reads `TOGETHER_API_KEY` env var.
-- **`segmenter.py`** — `detect_regions()` classifies lines into typed regions; per-type segmenters return `Phrase` objects. Region types: `PLAIN`, `CODE_BLOCK`, `JSON`, `BULLETS`, `XML_TAGGED`, `MARKDOWN`.
-- **`shapley.py`** — `run_shapley()` orchestrates everything. For N ≤ 4 phrases: exact (all permutations). For N > 4: Monte Carlo with `m_samples` walks, semaphore cap 5. `CoalitionCache` keys on sorted index set. `sample_coalition_walk()` calls `generate(user_input, system_prompt=prompt)` — system prompt in the system role, user input in the user role.
-- **`similarity.py`** — STANDARD: trigram cosine distance. SEMANTIC: embed → cosine distance → z-score filter → Qwen judge on outliers.
-- `temperature=0.0` on all generation calls.
+- `temperature: 0.0` on all LLM calls — determinism is essential for stable divergence measurement.
+- `#prompt` is always the user message and `#systemprompt` is always the system message in the DOM regardless of which is being analyzed. The `buildCall()` closure inside `runAnalysis()` routes coalition text to the correct API role.
+- Coalition cache stores Promises (not resolved values) — concurrent walks that hit the same coalition share a single in-flight API call rather than making duplicates.
+- Absent XML-tagged phrases in a coalition are replaced with `<tag>[...]</tag>` to preserve document structure; absent plain phrases are omitted entirely.
+- Textarea visual hierarchy swaps on target toggle: the analyzed textarea is tall/prominent (`.textarea--primary`), the context textarea is short/dimmed (`.textarea--secondary`). `selectTarget()` swaps these classes with a CSS transition.
+- CSS tooltips on the similarity buttons use `[data-tooltip]::after` — no JS required.
 
 ### CLI Agent (`agent/promptlens_agent/`)
 
