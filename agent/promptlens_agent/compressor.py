@@ -1,7 +1,31 @@
 import asyncio
+import re
 import aiohttp
 from promptlens import SaliencyReport, SaliencyScore
 from promptlens.generator import generate
+
+def reconstruct_from_original(original_prompt: str, diff: list[dict]) -> str:
+    """
+    Reconstruct a compressed prompt by substituting phrases directly in the
+    original text. Preserves all whitespace, newlines, and structure.
+    """
+    result = original_prompt
+
+    for entry in diff:
+        if entry["action"] == "keep":
+            continue
+        old = entry["original"]
+        new = entry["result"]  # "" for remove, replacement text for rewrite/merge
+        if old and old in result:
+            result = result.replace(old, new, 1)
+
+    # Clean up artifacts from removals
+    result = re.sub(r'\n{3,}', '\n\n', result)       # multiple blank lines → one
+    result = re.sub(r'\n[ \t]+\n', '\n\n', result)   # whitespace-only lines
+    result = re.sub(r'[ \t]+\n', '\n', result)        # trailing spaces on lines
+
+    return result.strip()
+
 
 COMPRESSION_SYSTEM_PROMPT = """You are a prompt compression specialist.
 
@@ -46,7 +70,7 @@ async def compress_prompt(report: SaliencyReport) -> tuple[str, list[dict]]:
     )
 
     compressed_parts, diff = _parse_compression_response(response, report.scores)
-    compressed_prompt = " ".join(compressed_parts)
+    compressed_prompt = reconstruct_from_original(report.prompt, diff)
     return compressed_prompt, diff
 
 

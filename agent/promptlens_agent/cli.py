@@ -113,7 +113,8 @@ def audit(repo: str, file: str | None, semantic: bool, test_inputs_file: str | N
 @click.option("--semantic", is_flag=True, default=False)
 @click.option("--test-inputs", "test_inputs_file", default=None)
 @click.option("--m-samples", default=20)
-def compress(file: str, threshold: float, semantic: bool, test_inputs_file: str | None, m_samples: int):
+@click.option("--apply", "apply_changes", is_flag=True, default=False, help="Prompt to apply changes in-place after compression.")
+def compress(file: str, threshold: float, semantic: bool, test_inputs_file: str | None, m_samples: int, apply_changes: bool):
     """
     Full compression pipeline: analyse → rewrite → validate → write .suggested file.
     Does not overwrite the original. Developer reviews and accepts manually.
@@ -172,6 +173,18 @@ def compress(file: str, threshold: float, semantic: bool, test_inputs_file: str 
 
         if not passed:
             click.echo("⚠️  Validation did not fully pass. Review .suggested file carefully before adopting.")
+
+        if apply_changes:
+            click.echo()
+            if not passed:
+                click.echo("Validation failed — applying is not recommended.")
+            confirmed = click.confirm("Apply compressed version? This will overwrite the original.", default=False)
+            if confirmed:
+                prompt_path.write_text(final_compressed, encoding="utf-8")
+                suggested_path.unlink(missing_ok=True)
+                click.echo(f"✓ Applied. {prompt_path} updated.")
+            else:
+                click.echo(f"Not applied. Suggested version is at: {suggested_path}")
 
     asyncio.run(run())
 
