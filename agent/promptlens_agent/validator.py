@@ -3,6 +3,7 @@ import aiohttp
 from promptlens import SaliencyReport, SimilarityMode
 from promptlens.generator import generate
 from promptlens.similarity import compute_divergences
+from .compressor import reconstruct_from_original
 
 MAX_RETRIES = 3
 
@@ -55,10 +56,8 @@ async def validate_compression(
             if not reinstated:
                 break
 
-            # Rebuild compressed prompt from updated diff
-            current_compressed = " ".join(
-                e["result"] for e in current_diff if e["result"]
-            )
+            # Rebuild compressed prompt from updated diff, preserving formatting
+            current_compressed = reconstruct_from_original(original_prompt, current_diff)
 
         # Final check
         worst_divergence, _ = await _run_validation(
