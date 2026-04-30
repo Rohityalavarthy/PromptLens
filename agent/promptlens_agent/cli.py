@@ -92,7 +92,8 @@ def cli():
 @cli.command()
 @click.option("--file", "-f", required=True, help="Path to prompt file to check.")
 @click.option("--semantic", is_flag=True, default=False, help="Use semantic similarity (requires Together AI key).")
-def check(file: str, semantic: bool):
+@click.option("--saliency-threshold", "saliency_threshold", default=0.15, help="Phrases scoring below this are flagged as low-impact. Default: 0.15.")
+def check(file: str, semantic: bool, saliency_threshold: float):
     """
     Fast saliency check on a single prompt file. M=3 samples.
     Use before commits to catch newly introduced bloat.
@@ -106,6 +107,7 @@ def check(file: str, semantic: bool):
             test_inputs=test_inputs,
             m_samples=3,
             mode=_get_mode(semantic),
+            low_saliency_threshold=saliency_threshold,
             on_progress=make_progress_callback("Shapley"),
         )
         print_saliency_report(report, file=file)
@@ -122,7 +124,8 @@ def check(file: str, semantic: bool):
 @click.option("--semantic", is_flag=True, default=False)
 @click.option("--test-inputs", "test_inputs_file", default=None, help="Path to .jsonl or .txt file of test inputs.")
 @click.option("--m-samples", default=20, help="Monte Carlo samples per test input. Default: 20.")
-def audit(repo: str, file: str | None, semantic: bool, test_inputs_file: str | None, m_samples: int):
+@click.option("--saliency-threshold", "saliency_threshold", default=0.15, help="Phrases scoring below this are flagged as low-impact. Default: 0.15.")
+def audit(repo: str, file: str | None, semantic: bool, test_inputs_file: str | None, m_samples: int, saliency_threshold: float):
     """
     Full saliency audit. Discovers all prompts in repo (or analyses a single file).
     Outputs a compression brief per prompt.
@@ -150,6 +153,7 @@ def audit(repo: str, file: str | None, semantic: bool, test_inputs_file: str | N
                 test_inputs=test_inputs,
                 m_samples=m_samples,
                 mode=_get_mode(semantic),
+                low_saliency_threshold=saliency_threshold,
                 on_progress=make_progress_callback("Shapley"),
             )
             reports[str(target)] = report
@@ -163,12 +167,15 @@ def audit(repo: str, file: str | None, semantic: bool, test_inputs_file: str | N
 
 @cli.command()
 @click.option("--file", "-f", required=True, help="Path to prompt file to compress.")
-@click.option("--threshold", default=0.15, help="Max output divergence allowed. Default: 0.15.")
+@click.option("--threshold", default=0.15, help="Max output divergence allowed by validation. Default: 0.15.")
+@click.option("--saliency-threshold", "saliency_threshold", default=None, type=float,
+              help="Phrases scoring below this are flagged for compression. "
+                   "Defaults to min(--threshold, 0.50) — scales automatically with --threshold.")
 @click.option("--semantic", is_flag=True, default=False)
 @click.option("--test-inputs", "test_inputs_file", default=None)
 @click.option("--m-samples", default=20)
 @click.option("--apply", "apply_changes", is_flag=True, default=False, help="Prompt to apply changes in-place after compression.")
-def compress(file: str, threshold: float, semantic: bool, test_inputs_file: str | None, m_samples: int, apply_changes: bool):
+def compress(file: str, threshold: float, saliency_threshold: float | None, semantic: bool, test_inputs_file: str | None, m_samples: int, apply_changes: bool):
     """
     Full compression pipeline: analyse → rewrite → validate → write .suggested file.
     Does not overwrite the original. Developer reviews and accepts manually.
@@ -178,16 +185,21 @@ def compress(file: str, threshold: float, semantic: bool, test_inputs_file: str 
     test_inputs = _load_test_inputs(test_inputs_file)
     mode = _get_mode(semantic)
 
+    # Auto-derive saliency threshold: scales with --threshold so raising the
+    # validation gate also flags more phrases for compression.
+    effective_saliency = saliency_threshold if saliency_threshold is not None else min(threshold, 0.50)
+
     prompt_text, write_path, make_output = _resolve_compress_target(prompt_path, raw_source)
 
     async def run():
         # Step 1: Shapley analysis
-        click.echo(f"⚙  Running Shapley analysis (M={m_samples})...")
+        click.echo(f"⚙  Running Shapley analysis (M={m_samples}, saliency-threshold={effective_saliency:.2f})...")
         report = await run_shapley(
             prompt=prompt_text,
             test_inputs=test_inputs,
             m_samples=m_samples,
             mode=mode,
+            low_saliency_threshold=effective_saliency,
             on_progress=make_progress_callback("Shapley"),
         )
         print_saliency_report(report, file=file)
