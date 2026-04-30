@@ -1,3 +1,4 @@
+import sys
 from promptlens import SaliencyReport, CompressionResult
 
 RESET  = "\033[0m"
@@ -8,6 +9,20 @@ GREEN  = "\033[92m"
 BLUE   = "\033[94m"
 GRAY   = "\033[90m"
 CYAN   = "\033[96m"
+
+
+def make_progress_callback(label: str, width: int = 24) -> callable:
+    """
+    Returns a callback(done, total) that renders an inline progress bar.
+    Overwrites the current line each call; prints a newline when done == total.
+    """
+    def on_progress(done: int, total: int) -> None:
+        filled = int(width * done / total) if total > 0 else 0
+        bar = CYAN + "█" * filled + GRAY + "░" * (width - filled) + RESET
+        pct = f"{done}/{total}"
+        end = "\n" if done >= total else ""
+        print(f"\r  {label:<12} [{bar}] {pct:>8}  ", end=end, flush=True)
+    return on_progress
 
 
 def _bar(score: float, width: int = 20) -> str:
@@ -70,13 +85,24 @@ def print_audit_summary(discoveries: list, reports: dict) -> None:
     print()
 
 
+_VERDICT_STYLE = {
+    "PASS":     (GREEN,  "✓ PASS",     None),
+    "MARGINAL": (ORANGE, "~ MARGINAL", "Slightly over threshold — spot-check a few outputs before adopting."),
+    "REVIEW":   (ORANGE, "⚠ REVIEW",   "Noticeable divergence — review .suggested file carefully before adopting."),
+    "FAIL":     (RED,    "✗ FAIL",     "Significant behavioral change detected — do not apply without thorough review."),
+}
+
+
 def print_compression_result(result: CompressionResult) -> None:
     print()
     print(f"{BOLD}{CYAN}✂  Compression Result{RESET}")
     print(f"{GRAY}{'─' * 60}{RESET}")
 
-    status = f"{GREEN}✓ PASSED{RESET}" if result.validation_passed else f"{RED}✗ FAILED{RESET}"
-    print(f"  Validation       : {status}")
+    color, label, advice = _VERDICT_STYLE.get(result.validation_verdict, (RED, "✗ FAIL", None))
+    print(f"  Validation       : {BOLD}{color}{label}{RESET}")
+    if advice:
+        print(f"  {GRAY}{advice}{RESET}")
+
     print(f"  Max divergence   : {result.worst_case_divergence:.3f}")
     print(f"  Original tokens  : {result.original_tokens:,}")
     print(f"  Compressed tokens: {result.compressed_tokens:,}")
@@ -88,7 +114,7 @@ def print_compression_result(result: CompressionResult) -> None:
     for entry in result.diff:
         if entry["action"] == "keep":
             continue
-        icon = {"remove": "🗑 ", "rewrite": "✏️ ", "merge": "⊕ "}.get(entry["action"], "  ")
+        icon = {"remove": "🗑 ", "rewrite": "✏️ ", "merge": "⊕ ", "paraphrase": "↺ "}.get(entry["action"], "  ")
         preview = entry["original"][:50] + ".." if len(entry["original"]) > 50 else entry["original"]
         if entry["action"] == "remove":
             print(f"  {icon} {RED}{preview}{RESET}")

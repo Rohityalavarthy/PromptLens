@@ -2,6 +2,7 @@ import asyncio
 import random
 import math
 import aiohttp
+from collections.abc import Callable
 from .types import Phrase, SaliencyScore, SaliencyReport, SimilarityMode
 from .generator import generate
 from .similarity import compute_divergences
@@ -102,6 +103,7 @@ async def run_shapley(
     mode: SimilarityMode = SimilarityMode.STANDARD,
     low_saliency_threshold: float = 0.15,
     session: aiohttp.ClientSession | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> SaliencyReport:
     """
     Full Shapley attribution pipeline.
@@ -157,7 +159,18 @@ async def run_shapley(
             for inp in test_inputs
             for _ in range(m_samples)
         ]
-        all_contributions = await asyncio.gather(*tasks)
+        total_tasks = len(tasks)
+        completed = 0
+
+        async def tracked(coro):
+            nonlocal completed
+            result = await coro
+            completed += 1
+            if on_progress:
+                on_progress(completed, total_tasks)
+            return result
+
+        all_contributions = await asyncio.gather(*[tracked(t) for t in tasks])
 
         # Average marginal contributions per phrase across all walks and inputs
         avg_contributions = [0.0] * n

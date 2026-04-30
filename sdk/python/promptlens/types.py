@@ -60,7 +60,7 @@ class CompressionResult:
     original_tokens: int
     compressed_tokens: int
     token_delta: int
-    validation_passed: bool
+    validation_verdict: str              # "PASS" | "MARGINAL" | "REVIEW" | "FAIL"
     worst_case_divergence: float
     saliency_report: SaliencyReport
     diff: list[dict]                     # list of {phrase, action, original, compressed}

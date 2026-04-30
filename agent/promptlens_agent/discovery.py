@@ -110,6 +110,38 @@ class PythonPromptVisitor(ast.NodeVisitor):
         return None, "unknown", None
 
 
+def _process_file(py_file: Path, repo_root: Path) -> list[DiscoveredPrompt]:
+    """Parse one Python file and return all discovered prompts."""
+    try:
+        source = py_file.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        lines = source.splitlines()
+        visitor = PythonPromptVisitor(lines, str(py_file))
+        visitor.visit(tree)
+
+        for dp in visitor.discovered:
+            if dp.origin == "file" and dp.origin_file:
+                prompt_path = repo_root / dp.origin_file
+                if prompt_path.exists():
+                    dp.prompt_text = prompt_path.read_text(encoding="utf-8")
+                    dp.estimated_tokens = len(dp.prompt_text.split())
+
+        return visitor.discovered
+    except (SyntaxError, UnicodeDecodeError):
+        return []
+
+
+def discover_prompts_in_file(file_path: str) -> list[DiscoveredPrompt]:
+    """
+    Discover all prompts in a single Python file.
+    repo_root is treated as the file's parent directory for resolving file-origin paths.
+    """
+    path = Path(file_path)
+    if not path.exists() or path.suffix != ".py":
+        return []
+    return _process_file(path, path.parent)
+
+
 def discover_prompts(repo_path: str) -> list[DiscoveredPrompt]:
     """
     Walk repo, find all Python files, run AST visitor on each.
@@ -117,30 +149,11 @@ def discover_prompts(repo_path: str) -> list[DiscoveredPrompt]:
     """
     discovered = []
     repo = Path(repo_path)
+    skip_dirs = {".venv", "venv", "node_modules", "__pycache__", ".git"}
 
     for py_file in repo.rglob("*.py"):
-        # Skip venv, node_modules, __pycache__, test files
-        skip_dirs = {".venv", "venv", "node_modules", "__pycache__", ".git"}
         if any(part in skip_dirs for part in py_file.parts):
             continue
-
-        try:
-            source = py_file.read_text(encoding="utf-8")
-            tree = ast.parse(source)
-            lines = source.splitlines()
-            visitor = PythonPromptVisitor(lines, str(py_file))
-            visitor.visit(tree)
-
-            # Resolve file-origin prompts
-            for dp in visitor.discovered:
-                if dp.origin == "file" and dp.origin_file:
-                    prompt_path = repo / dp.origin_file
-                    if prompt_path.exists():
-                        dp.prompt_text = prompt_path.read_text(encoding="utf-8")
-                        dp.estimated_tokens = len(dp.prompt_text.split())
-
-            discovered.extend(visitor.discovered)
-        except (SyntaxError, UnicodeDecodeError):
-            continue  # skip unparseable files
+        discovered.extend(_process_file(py_file, repo))
 
     return discovered
