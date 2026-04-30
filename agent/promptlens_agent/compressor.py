@@ -157,6 +157,9 @@ def _parse_compression_response(
             result = _result_after_arrow(_after_bracket(line), fallback="")
             if not result:
                 diff.append({"phrase": i, "action": "remove", "original": original, "result": ""})
+            elif len(result.split()) >= len(original.split()):
+                # LLM produced same length or longer — not a compression, keep original
+                diff.append({"phrase": i, "action": "keep", "original": original, "result": original})
             else:
                 diff.append({"phrase": i, "action": "rewrite", "original": original, "result": result})
 
@@ -164,6 +167,8 @@ def _parse_compression_response(
             result = _result_after_arrow(_after_bracket(line), fallback="")
             if not result:
                 diff.append({"phrase": i, "action": "remove", "original": original, "result": ""})
+            elif len(result.split()) >= len(original.split()):
+                diff.append({"phrase": i, "action": "keep", "original": original, "result": original})
             else:
                 diff.append({"phrase": i, "action": "paraphrase", "original": original, "result": result})
 

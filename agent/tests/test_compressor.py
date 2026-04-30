@@ -138,6 +138,45 @@ def test_parse_empty_paraphrase_becomes_remove():
     assert diff[0]["action"] == "remove"
 
 
+def test_parse_rewrite_longer_than_original_becomes_keep():
+    scores = _scores("You are helpful.")
+    # 3 words → 4 words: not a compression
+    diff = _parse_compression_response(
+        "[REWRITE] You are helpful. → You assist with inquiries.",
+        scores,
+    )
+    assert diff[0]["action"] == "keep"
+    assert diff[0]["result"] == "You are helpful."
+
+
+def test_parse_paraphrase_longer_than_original_becomes_keep():
+    scores = _scores("Be concise.")
+    diff = _parse_compression_response(
+        "[PARAPHRASE] Be concise. → Keep your responses brief and to the point.",
+        scores,
+    )
+    assert diff[0]["action"] == "keep"
+
+
+def test_parse_rewrite_same_length_becomes_keep():
+    scores = _scores("You are helpful.")  # 3 words
+    diff = _parse_compression_response(
+        "[REWRITE] You are helpful. → You are useful.",  # also 3 words
+        scores,
+    )
+    assert diff[0]["action"] == "keep"
+
+
+def test_parse_rewrite_strictly_shorter_is_accepted():
+    scores = _scores("You are extremely helpful.")  # 4 words
+    diff = _parse_compression_response(
+        "[REWRITE] You are extremely helpful. → Be helpful.",  # 2 words
+        scores,
+    )
+    assert diff[0]["action"] == "rewrite"
+    assert diff[0]["result"] == "Be helpful."
+
+
 def test_parse_unparseable_line_falls_back_to_keep():
     scores = _scores("You are helpful.")
     diff = _parse_compression_response("some random line with no bracket", scores)
