@@ -1,11 +1,63 @@
 import asyncio
+import re
 import click
 from pathlib import Path
-from .discovery import discover_prompts
-from .reporter import print_saliency_report, print_audit_summary, print_compression_result
+from .discovery import discover_prompts, discover_prompts_in_file
+from .reporter import print_saliency_report, print_audit_summary, print_compression_result, make_progress_callback
 from .compressor import compress_prompt
 from .validator import validate_compression
 from promptlens import run_shapley, SimilarityMode, CompressionResult
+
+
+def _resolve_compress_target(
+    prompt_path: Path,
+    raw_source: str,
+) -> tuple[str, Path, callable]:
+    """
+    Determine what content to compress and how to reconstruct the output file.
+
+    Returns (prompt_text, write_path, make_output) where:
+      prompt_text  — the string to run Shapley analysis and compression on
+      write_path   — Path to write the result to (may differ from prompt_path
+                     when the prompt lives in a separate file)
+      make_output  — callable(compressed: str) -> str: builds the full file
+                     content to write, splicing compressed back into the
+                     original structure
+
+    Resolution order for .py files:
+      1. AST-based discovery (handles API call patterns, variables, file refs)
+      2. Regex fallback for standalone prompt strings without an API call
+      3. Whole-file fallback
+    """
+    if prompt_path.suffix == ".py":
+        # --- Primary: AST discovery ---
+        findings = discover_prompts_in_file(str(prompt_path))
+        hit = next((d for d in findings if d.prompt_text), None)
+        if hit:
+            if hit.origin == "file" and hit.origin_file:
+                # Prompt lives in an external file — write there directly
+                ext = Path(hit.origin_file)
+                if not ext.is_absolute():
+                    ext = prompt_path.parent / ext
+                return hit.prompt_text, ext, lambda c: c
+
+            # Inline literal or variable: replace the prompt value in the source.
+            # str.replace(..., 1) is safe because the AST extracted this exact
+            # string from the same source, so it must be present.
+            original = hit.prompt_text
+            return original, prompt_path, lambda c, _o=original, _s=raw_source: _s.replace(_o, c, 1)
+
+        # --- Fallback: regex for prompt-only files with no API call ---
+        for delim in ('"""', "'''"):
+            m = re.search(re.escape(delim) + r"(.*?)" + re.escape(delim), raw_source, re.DOTALL)
+            if m:
+                prefix = raw_source[:m.start(1)]
+                content = m.group(1)
+                suffix = raw_source[m.end(1):]
+                return content, prompt_path, lambda c, _p=prefix, _s=suffix: _p + c + _s
+
+    # --- Non-Python or no match: whole file is the prompt ---
+    return raw_source, prompt_path, lambda c: c
 
 
 def _get_mode(semantic: bool) -> SimilarityMode:
@@ -54,6 +106,7 @@ def check(file: str, semantic: bool):
             test_inputs=test_inputs,
             m_samples=3,
             mode=_get_mode(semantic),
+            on_progress=make_progress_callback("Shapley"),
         )
         print_saliency_report(report, file=file)
         if report.redundancy_fraction > 0.2:
@@ -97,6 +150,7 @@ def audit(repo: str, file: str | None, semantic: bool, test_inputs_file: str | N
                 test_inputs=test_inputs,
                 m_samples=m_samples,
                 mode=_get_mode(semantic),
+                on_progress=make_progress_callback("Shapley"),
             )
             reports[str(target)] = report
             print_saliency_report(report, file=str(target))
@@ -120,9 +174,11 @@ def compress(file: str, threshold: float, semantic: bool, test_inputs_file: str 
     Does not overwrite the original. Developer reviews and accepts manually.
     """
     prompt_path = Path(file)
-    prompt_text = prompt_path.read_text(encoding="utf-8")
+    raw_source = prompt_path.read_text(encoding="utf-8")
     test_inputs = _load_test_inputs(test_inputs_file)
     mode = _get_mode(semantic)
+
+    prompt_text, write_path, make_output = _resolve_compress_target(prompt_path, raw_source)
 
     async def run():
         # Step 1: Shapley analysis
@@ -132,16 +188,17 @@ def compress(file: str, threshold: float, semantic: bool, test_inputs_file: str 
             test_inputs=test_inputs,
             m_samples=m_samples,
             mode=mode,
+            on_progress=make_progress_callback("Shapley"),
         )
         print_saliency_report(report, file=file)
 
-        # Step 2: Constrained compression
+        # Step 2: Constrained compression — LLM sees scores + threshold
         click.echo("✂  Compressing low-saliency phrases...")
-        compressed, diff = await compress_prompt(report)
+        compressed, diff = await compress_prompt(report, threshold=threshold)
 
         # Step 3: Validation loop
         click.echo(f"🔍 Validating against {len(test_inputs)} test inputs (threshold={threshold})...")
-        passed, worst_divergence, final_compressed = await validate_compression(
+        verdict, worst_divergence, final_compressed = await validate_compression(
             original_prompt=prompt_text,
             compressed_prompt=compressed,
             test_inputs=test_inputs,
@@ -149,9 +206,12 @@ def compress(file: str, threshold: float, semantic: bool, test_inputs_file: str 
             diff=diff,
             threshold=threshold,
             mode=mode,
+            on_progress=make_progress_callback("Validation"),
         )
 
-        # Step 4: Write output
+        # Step 4: Reconstruct full file, preserving surrounding code structure
+        final_output = make_output(final_compressed)
+
         original_tokens = len(prompt_text.split())
         compressed_tokens = len(final_compressed.split())
         result = CompressionResult(
@@ -160,29 +220,28 @@ def compress(file: str, threshold: float, semantic: bool, test_inputs_file: str 
             original_tokens=original_tokens,
             compressed_tokens=compressed_tokens,
             token_delta=original_tokens - compressed_tokens,
-            validation_passed=passed,
+            validation_verdict=verdict,
             worst_case_divergence=worst_divergence,
             saliency_report=report,
             diff=diff,
         )
 
-        suggested_path = prompt_path.with_suffix(prompt_path.suffix + ".suggested")
-        suggested_path.write_text(final_compressed, encoding="utf-8")
+        suggested_path = write_path.with_suffix(write_path.suffix + ".suggested")
+        suggested_path.write_text(final_output, encoding="utf-8")
 
         print_compression_result(result)
 
-        if not passed:
-            click.echo("⚠️  Validation did not fully pass. Review .suggested file carefully before adopting.")
-
         if apply_changes:
             click.echo()
-            if not passed:
+            if verdict == "FAIL":
                 click.echo("Validation failed — applying is not recommended.")
+            elif verdict in ("MARGINAL", "REVIEW"):
+                click.echo("Divergence detected — review .suggested before applying.")
             confirmed = click.confirm("Apply compressed version? This will overwrite the original.", default=False)
             if confirmed:
-                prompt_path.write_text(final_compressed, encoding="utf-8")
+                write_path.write_text(final_output, encoding="utf-8")
                 suggested_path.unlink(missing_ok=True)
-                click.echo(f"✓ Applied. {prompt_path} updated.")
+                click.echo(f"✓ Applied. {write_path} updated.")
             else:
                 click.echo(f"Not applied. Suggested version is at: {suggested_path}")
 
