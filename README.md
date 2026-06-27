@@ -309,12 +309,39 @@ cd web && python3 -m http.server 8080
 # open http://localhost:8080
 ```
 
-| Provider | Use | Notes |
-|---|---|---|
-| Groq | Standard mode | Free tier, no credit card. Recommended for most users. |
-| Together AI | Standard + Semantic mode | $1 free credit. Required for embedding-based similarity. |
+### Providers
+
+| Provider | Saliency | Semantic similarity | Notes |
+|---|---|---|---|
+| Groq | ✓ | — | Free tier, no credit card. Fastest for saliency. |
+| Together AI | ✓ | ✓ (nomic-embed) | $1 free credit. Enables embedding-based similarity. |
+| OpenAI | ✓ | ✓ (text-embedding-3-small) | GPT-4o mini for analysis, embeddings for semantic mode. |
+| Anthropic | ✓ | — | Claude Haiku. No embedding endpoint; falls back to trigram similarity. |
 
 Keys are stored in `localStorage` — they never leave your browser.
+
+### Compress
+
+After running an analysis, a **Compress** button appears in the results panel. It removes all phrases scoring below your chosen threshold and runs a single LLM pass to fix any structural issues left behind (broken JSON, orphaned XML tags, incomplete bullet lists) — without rephrasing or adding back content.
+
+**Flow:**
+1. Run analysis → phrases are scored and colour-coded
+2. Click **Compress** → set the **Remove below** threshold (default `< 0.15`)
+3. A structural cleanup LLM call patches formatting only
+4. Review the diff — every removed phrase is listed
+5. Adjust the threshold and click **Recompress** to iterate
+6. Click **Apply** to copy the compressed prompt back into the editor, or **Discard** to cancel
+
+Atomic phrases (code blocks, XML-tagged sections) are never removed regardless of score.
+
+### Other features
+
+- **Heatmap / Table view** — toggle between the colour-coded heatmap and a sortable score table
+- **Threshold filter** — slider to dim phrases below a score, focusing the heatmap on high-impact content
+- **Copy / Export** — copy results as a markdown table, or export full JSON (phrases, scores, settings, baseline response)
+- **Share** — encodes the current analysis state into a URL fragment; anyone with the link can restore the exact view
+- **Run history** — last 8 analyses stored in `localStorage`; accessible via the History dropdown next to the run button
+- **Auto-save** — prompt text is saved to `localStorage` on every keystroke and restored on reload
 
 ---
 
