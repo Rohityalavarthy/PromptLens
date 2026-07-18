@@ -30,6 +30,33 @@ def _resolve_option(cli_value, config_value):
     return cli_value if cli_value is not None else config_value
 
 
+def _setup_provider_from_config(config):
+    """Configure the LLM provider based on config settings."""
+    import os
+    from promptlens.provider import TogetherProvider, OpenAIProvider, AnthropicProvider
+    from promptlens.generator import configure_provider
+
+    PROVIDER_MAP = {"together": TogetherProvider, "openai": OpenAIProvider, "anthropic": AnthropicProvider}
+    provider_cls = PROVIDER_MAP.get(config.provider, TogetherProvider)
+
+    kwargs = {}
+    if config.model:
+        kwargs["generator_model"] = config.model
+
+    # Determine API key
+    if config.api_key_env:
+        api_key = os.environ.get(config.api_key_env)
+    else:
+        default_env = {"together": "TOGETHER_API_KEY", "openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
+        api_key = os.environ.get(default_env.get(config.provider, "TOGETHER_API_KEY"))
+
+    if api_key:
+        kwargs["api_key"] = api_key
+
+    provider = provider_cls(**kwargs)
+    configure_provider(provider)
+
+
 def _resolve_compress_target(
     prompt_path: Path,
     raw_source: str,
@@ -132,6 +159,7 @@ def check(file: str, semantic: bool, saliency_threshold: float | None, output_fo
     """
     try:
         config = load_config()
+        _setup_provider_from_config(config)
         if not semantic:
             semantic = config.semantic
         saliency_threshold = _resolve_option(saliency_threshold, config.saliency_threshold)
@@ -196,6 +224,7 @@ def audit(repo: str, file: str | None, semantic: bool, test_inputs_file: str | N
     """
     try:
         config = load_config()
+        _setup_provider_from_config(config)
         if not semantic:
             semantic = config.semantic
         m_samples = _resolve_option(m_samples, config.m_samples)
@@ -209,11 +238,11 @@ def audit(repo: str, file: str | None, semantic: bool, test_inputs_file: str | N
             output_format = "terminal"
 
         if file:
-            targets = [Path(file)]
+            targets = [(Path(file), None)]  # (path, prompt_text) — None means read from file
         else:
             discoveries = discover_prompts(repo)
             targets = [
-                Path(d.origin_file or d.file)
+                (Path(d.origin_file or d.file), d.prompt_text)
                 for d in discoveries
                 if d.prompt_text
             ]
@@ -226,8 +255,8 @@ def audit(repo: str, file: str | None, semantic: bool, test_inputs_file: str | N
             all_scores = {}
             any_high_redundancy = False
 
-            for target in targets:
-                prompt_text = target.read_text(encoding="utf-8")
+            for target_path, discovered_text in targets:
+                prompt_text = discovered_text if discovered_text is not None else target_path.read_text(encoding="utf-8")
                 test_inputs = _load_test_inputs(test_inputs_file)
                 report = await run_shapley(
                     prompt=prompt_text,
@@ -237,14 +266,14 @@ def audit(repo: str, file: str | None, semantic: bool, test_inputs_file: str | N
                     low_saliency_threshold=saliency_threshold,
                     on_progress=make_progress_callback("Shapley"),
                 )
-                reports[str(target)] = report
-                all_scores[str(target)] = report.scores
+                reports[str(target_path)] = report
+                all_scores[str(target_path)] = report.scores
 
                 if report.redundancy_fraction > 0.2:
                     any_high_redundancy = True
 
                 if output_format == "terminal":
-                    print_saliency_report(report, file=str(target))
+                    print_saliency_report(report, file=str(target_path))
 
             if output_format == "json":
                 # Build per-file summary for JSON
@@ -262,7 +291,7 @@ def audit(repo: str, file: str | None, semantic: bool, test_inputs_file: str | N
                 click.echo(result, file=sys.stdout)
             else:
                 if len(reports) > 1:
-                    print_audit_summary(targets, reports)
+                    print_audit_summary([t[0] for t in targets], reports)
 
             # Exit code: 1 if any file has redundancy > 20%
             if any_high_redundancy:
@@ -307,6 +336,7 @@ def compress(file: str | None, threshold: float | None, saliency_threshold: floa
             sys.exit(2)
 
         config = load_config()
+        _setup_provider_from_config(config)
         if not semantic:
             semantic = config.semantic
         threshold = _resolve_option(threshold, config.threshold)

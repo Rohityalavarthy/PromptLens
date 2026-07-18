@@ -252,52 +252,37 @@ def _apply_merge_semantics(diff: list[dict], scores: list[SaliencyScore]) -> lis
 
         # Validate merge target
         if merge_target < 0 or merge_target >= num_phrases:
-            logger.warning(
-                f"Merge target #{merge_target} out of range for phrase #{entry['phrase']}; treating as REMOVE"
+            _demote_to_remove(
+                entry, f"Merge target #{merge_target} out of range for phrase #{entry['phrase']}; treating as REMOVE"
             )
-            entry["action"] = "remove"
-            entry["result"] = ""
-            entry.pop("merge_target", None)
             continue
 
         if merge_target == entry["phrase"]:
-            logger.warning(
-                f"Self-referencing merge for phrase #{entry['phrase']}; treating as REMOVE"
+            _demote_to_remove(
+                entry, f"Self-referencing merge for phrase #{entry['phrase']}; treating as REMOVE"
             )
-            entry["action"] = "remove"
-            entry["result"] = ""
-            entry.pop("merge_target", None)
             continue
 
         target_entry = diff_by_id.get(merge_target)
         if target_entry is None:
             # Target not in diff — add a default KEEP entry? Just treat as remove.
-            logger.warning(
-                f"Merge target #{merge_target} not found in diff for phrase #{entry['phrase']}; treating as REMOVE"
+            _demote_to_remove(
+                entry, f"Merge target #{merge_target} not found in diff for phrase #{entry['phrase']}; treating as REMOVE"
             )
-            entry["action"] = "remove"
-            entry["result"] = ""
-            entry.pop("merge_target", None)
             continue
 
         # Check if target is already removed
         if target_entry["action"] == "remove":
-            logger.warning(
-                f"Merge target #{merge_target} is already removed for phrase #{entry['phrase']}; treating as REMOVE"
+            _demote_to_remove(
+                entry, f"Merge target #{merge_target} is already removed for phrase #{entry['phrase']}; treating as REMOVE"
             )
-            entry["action"] = "remove"
-            entry["result"] = ""
-            entry.pop("merge_target", None)
             continue
 
         # Check if target is itself merged into another
         if target_entry["action"] == "merge" and "merge_target" in target_entry:
-            logger.warning(
-                f"Merge target #{merge_target} is itself merged into another for phrase #{entry['phrase']}; treating as REMOVE"
+            _demote_to_remove(
+                entry, f"Merge target #{merge_target} is itself merged into another for phrase #{entry['phrase']}; treating as REMOVE"
             )
-            entry["action"] = "remove"
-            entry["result"] = ""
-            entry.pop("merge_target", None)
             continue
 
         # Valid merge: source is removed, target absorbs content
@@ -311,6 +296,14 @@ def _apply_merge_semantics(diff: list[dict], scores: list[SaliencyScore]) -> lis
             target_entry["result"] = merged_text.strip()
 
     return diff
+
+
+def _demote_to_remove(entry: dict, reason: str) -> None:
+    """Convert a merge entry to a remove when the merge target is invalid."""
+    logger.warning(reason)
+    entry["action"] = "remove"
+    entry["result"] = ""
+    entry.pop("merge_target", None)
 
 
 def _after_bracket(line: str) -> str:

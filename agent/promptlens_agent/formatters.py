@@ -114,36 +114,29 @@ def _action_rationale(entry: dict, scores: list) -> str:
     return f"Action '{action}' applied based on saliency score {score:.2f}."
 
 
-def format_saliency_sarif(scores: list, token_count: int, file: str, threshold: float) -> str:
-    """SARIF v2.1.0 output for saliency findings."""
-    results = []
-    for s in scores:
-        if s.score >= threshold:
-            continue  # Only report low-saliency phrases
-        level = "warning" if s.score < 0.10 else "note"
-        disposition = "remove" if s.score < threshold * 0.5 else "compress"
-        text = s.phrase.text
-        if len(text) > 80:
-            msg = f"Phrase scores {s.score:.3f} (below threshold {threshold}). Disposition: {disposition}. Text: \"{text[:80]}...\""
-        else:
-            msg = f"Phrase scores {s.score:.3f} (below threshold {threshold}). Disposition: {disposition}. Text: \"{text}\""
-        result = {
-            "ruleId": "promptlens/low-saliency",
-            "level": level,
-            "message": {"text": msg},
-            "locations": [{
-                "physicalLocation": {
-                    "artifactLocation": {"uri": file},
-                    "region": {
-                        "charOffset": s.phrase.char_start if s.phrase.char_start >= 0 else 0,
-                        "charLength": (s.phrase.char_end - s.phrase.char_start) if s.phrase.char_start >= 0 else len(s.phrase.text),
-                    }
+def _build_sarif_result(score, file: str, threshold: float) -> dict:
+    """Build a single SARIF result entry for a low-saliency phrase."""
+    level = "warning" if score.score < 0.10 else "note"
+    disposition = "remove" if score.score < threshold * 0.5 else "compress"
+    return {
+        "ruleId": "promptlens/low-saliency",
+        "level": level,
+        "message": {"text": f"Phrase scores {score.score:.3f} (below threshold {threshold}). Disposition: {disposition}."},
+        "locations": [{
+            "physicalLocation": {
+                "artifactLocation": {"uri": file},
+                "region": {
+                    "charOffset": score.phrase.char_start if score.phrase.char_start >= 0 else 0,
+                    "charLength": (score.phrase.char_end - score.phrase.char_start) if score.phrase.char_start >= 0 else len(score.phrase.text),
                 }
-            }],
-        }
-        results.append(result)
+            }
+        }],
+    }
 
-    sarif = {
+
+def _build_sarif_envelope(results: list[dict]) -> dict:
+    """Build the SARIF v2.1.0 envelope around results."""
+    return {
         "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
         "version": "2.1.0",
         "runs": [{
@@ -155,14 +148,30 @@ def format_saliency_sarif(scores: list, token_count: int, file: str, threshold: 
                     "rules": [{
                         "id": "promptlens/low-saliency",
                         "shortDescription": {"text": "Low-saliency phrase detected"},
-                        "helpUri": "https://github.com/Rohityalavarthy/PromptLens#saliency",
                     }]
                 }
             },
             "results": results,
         }]
     }
-    return json.dumps(sarif, indent=2)
+
+
+def format_saliency_sarif(scores: list, token_count: int, file: str, threshold: float) -> str:
+    """SARIF v2.1.0 output for saliency findings."""
+    results = []
+    for s in scores:
+        if s.score >= threshold:
+            continue  # Only report low-saliency phrases
+        result = _build_sarif_result(s, file, threshold)
+        # Add text snippet to message for single-file check
+        text = s.phrase.text
+        if len(text) > 80:
+            result["message"]["text"] += f" Text: \"{text[:80]}...\""
+        else:
+            result["message"]["text"] += f" Text: \"{text}\""
+        results.append(result)
+
+    return json.dumps(_build_sarif_envelope(results), indent=2)
 
 
 def format_audit_sarif(all_scores: dict[str, list], threshold: float) -> str:
@@ -172,40 +181,6 @@ def format_audit_sarif(all_scores: dict[str, list], threshold: float) -> str:
         for s in scores:
             if s.score >= threshold:
                 continue
-            level = "warning" if s.score < 0.10 else "note"
-            disposition = "remove" if s.score < threshold * 0.5 else "compress"
-            result = {
-                "ruleId": "promptlens/low-saliency",
-                "level": level,
-                "message": {"text": f"Phrase scores {s.score:.3f} (below threshold {threshold}). Disposition: {disposition}."},
-                "locations": [{
-                    "physicalLocation": {
-                        "artifactLocation": {"uri": file},
-                        "region": {
-                            "charOffset": s.phrase.char_start if s.phrase.char_start >= 0 else 0,
-                            "charLength": (s.phrase.char_end - s.phrase.char_start) if s.phrase.char_start >= 0 else len(s.phrase.text),
-                        }
-                    }
-                }],
-            }
-            results.append(result)
+            results.append(_build_sarif_result(s, file, threshold))
 
-    sarif = {
-        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
-        "version": "2.1.0",
-        "runs": [{
-            "tool": {
-                "driver": {
-                    "name": "PromptLens",
-                    "version": "0.1.0",
-                    "informationUri": "https://github.com/Rohityalavarthy/PromptLens",
-                    "rules": [{
-                        "id": "promptlens/low-saliency",
-                        "shortDescription": {"text": "Low-saliency phrase detected"},
-                    }]
-                }
-            },
-            "results": results,
-        }]
-    }
-    return json.dumps(sarif, indent=2)
+    return json.dumps(_build_sarif_envelope(results), indent=2)

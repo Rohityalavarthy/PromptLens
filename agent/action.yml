@@ -27,10 +27,23 @@ runs:
       shell: bash
     - name: Run audit
       run: |
-        promptlens audit --repo . --format ${{ inputs.format }} --saliency-threshold ${{ inputs.threshold }} --ci > promptlens-results.${{ inputs.format }}
+        # Validate inputs
+        case "$PROMPTLENS_FORMAT" in
+          json|sarif) ;;
+          *) echo "Error: format must be 'json' or 'sarif'" >&2; exit 2;;
+        esac
+        if ! echo "$PROMPTLENS_THRESHOLD" | grep -qE '^[0-9]+\.?[0-9]*$'; then
+          echo "Error: threshold must be numeric" >&2; exit 2
+        fi
+        promptlens audit --repo . \
+          --format "$PROMPTLENS_FORMAT" \
+          --saliency-threshold "$PROMPTLENS_THRESHOLD" \
+          --ci > "promptlens-results.$PROMPTLENS_FORMAT"
       shell: bash
       env:
         TOGETHER_API_KEY: ${{ inputs.together-api-key }}
+        PROMPTLENS_FORMAT: ${{ inputs.format }}
+        PROMPTLENS_THRESHOLD: ${{ inputs.threshold }}
     - name: Upload SARIF
       uses: github/codeql-action/upload-sarif@v3
       if: ${{ inputs.format == 'sarif' && always() }}

@@ -14,23 +14,6 @@ from .provider import (
     get_configured_judge_provider,
 )
 
-TOGETHER_API_BASE = "https://api.together.xyz/v1"
-
-GENERATOR_MODEL  = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
-EMBEDDING_MODEL  = "togethercomputer/m2-bert-80M-8k-retrieval"
-JUDGE_MODEL      = "Qwen/Qwen2.5-72B-Instruct-Turbo"
-
-
-def get_api_key() -> str:
-    key = os.environ.get("TOGETHER_API_KEY")
-    if not key:
-        raise EnvironmentError(
-            "TOGETHER_API_KEY environment variable not set.\n"
-            "Get a key at https://api.together.xyz and run:\n"
-            "  export TOGETHER_API_KEY=your_key_here"
-        )
-    return key
-
 
 async def generate(
     prompt: str,

@@ -77,6 +77,47 @@ class LLMProvider(GenerationProvider, EmbeddingProvider, JudgeProvider, Protocol
 # ---------------------------------------------------------------------------
 
 
+def _get_api_key_or_raise(api_key: str, env_var: str, provider_name: str, signup_url: str) -> str:
+    """Return the API key or raise EnvironmentError with helpful message."""
+    if not api_key:
+        raise EnvironmentError(
+            f"{env_var} environment variable not set.\n"
+            f"Get a key at {signup_url} and run:\n"
+            f"  export {env_var}=your_key_here"
+        )
+    return api_key
+
+
+async def _chat_completion_request(
+    base_url: str, api_key: str, model: str, messages: list[dict],
+    max_tokens: int, temperature: float, retry_config, operation_name: str,
+    session=None,
+) -> str:
+    """Shared chat completion request logic for OpenAI-compatible APIs."""
+    close_session = session is None
+    if session is None:
+        session = aiohttp.ClientSession()
+    try:
+        async def _do_request():
+            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+            payload = {
+                "model": model,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            }
+            async with asyncio.timeout(retry_config.timeout):
+                async with session.post(f"{base_url}/chat/completions", headers=headers, json=payload) as resp:
+                    resp.raise_for_status()
+                    data = await resp.json()
+                    return data["choices"][0]["message"]["content"].strip()
+
+        return await with_retry(_do_request, config=retry_config, operation_name=operation_name)
+    finally:
+        if close_session:
+            await session.close()
+
+
 class TogetherProvider:
     """Full-capability provider using Together AI APIs."""
 
@@ -96,13 +137,9 @@ class TogetherProvider:
         self._retry_config = retry_config
 
     def _get_api_key(self) -> str:
-        if not self.api_key:
-            raise EnvironmentError(
-                "TOGETHER_API_KEY environment variable not set.\n"
-                "Get a key at https://api.together.xyz and run:\n"
-                "  export TOGETHER_API_KEY=your_key_here"
-            )
-        return self.api_key
+        return _get_api_key_or_raise(
+            self.api_key, "TOGETHER_API_KEY", "TogetherProvider", "https://api.together.xyz"
+        )
 
     async def generate(
         self,
@@ -118,36 +155,12 @@ class TogetherProvider:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
-        payload = {
-            "model": self.generator_model,
-            "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-        }
-
-        close_session = session is None
-        if session is None:
-            session = aiohttp.ClientSession()
-
-        try:
-            async def _do_request():
-                async with asyncio.timeout(self._retry_config.timeout):
-                    async with session.post(
-                        f"{self.base_url}/chat/completions",
-                        headers={
-                            "Authorization": f"Bearer {api_key}",
-                            "Content-Type": "application/json",
-                        },
-                        json=payload,
-                    ) as resp:
-                        resp.raise_for_status()
-                        data = await resp.json()
-                        return data["choices"][0]["message"]["content"].strip()
-
-            return await with_retry(_do_request, config=self._retry_config, operation_name="TogetherProvider.generate")
-        finally:
-            if close_session:
-                await session.close()
+        return await _chat_completion_request(
+            base_url=self.base_url, api_key=api_key, model=self.generator_model,
+            messages=messages, max_tokens=max_tokens, temperature=temperature,
+            retry_config=self._retry_config, operation_name="TogetherProvider.generate",
+            session=session,
+        )
 
     async def get_embedding(
         self, text: str, session: aiohttp.ClientSession
@@ -175,32 +188,19 @@ class TogetherProvider:
     ) -> int:
         api_key = self._get_api_key()
         prompt = JUDGE_PROMPT_TEMPLATE.format(output_a=output_a, output_b=output_b)
+        messages = [{"role": "user", "content": prompt}]
 
-        async def _do_request():
-            async with asyncio.timeout(self._retry_config.timeout):
-                async with session.post(
-                    f"{self.base_url}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": self.judge_model,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "max_tokens": 5,
-                        "temperature": 0,
-                    },
-                ) as resp:
-                    resp.raise_for_status()
-                    data = await resp.json()
-                    raw = data["choices"][0]["message"]["content"].strip()
-                    try:
-                        score = int(raw)
-                        return max(0, min(10, score))
-                    except ValueError:
-                        return 5  # neutral fallback
-
-        return await with_retry(_do_request, config=self._retry_config, operation_name="TogetherProvider.judge_divergence")
+        raw = await _chat_completion_request(
+            base_url=self.base_url, api_key=api_key, model=self.judge_model,
+            messages=messages, max_tokens=5, temperature=0,
+            retry_config=self._retry_config, operation_name="TogetherProvider.judge_divergence",
+            session=session,
+        )
+        try:
+            score = int(raw)
+            return max(0, min(10, score))
+        except ValueError:
+            return 5  # neutral fallback
 
 
 class OpenAIProvider:
@@ -220,13 +220,9 @@ class OpenAIProvider:
         self._retry_config = retry_config
 
     def _get_api_key(self) -> str:
-        if not self.api_key:
-            raise EnvironmentError(
-                "OPENAI_API_KEY environment variable not set.\n"
-                "Get a key at https://platform.openai.com and run:\n"
-                "  export OPENAI_API_KEY=your_key_here"
-            )
-        return self.api_key
+        return _get_api_key_or_raise(
+            self.api_key, "OPENAI_API_KEY", "OpenAIProvider", "https://platform.openai.com"
+        )
 
     async def generate(
         self,
@@ -242,36 +238,12 @@ class OpenAIProvider:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
-        payload = {
-            "model": self.generator_model,
-            "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-        }
-
-        close_session = session is None
-        if session is None:
-            session = aiohttp.ClientSession()
-
-        try:
-            async def _do_request():
-                async with asyncio.timeout(self._retry_config.timeout):
-                    async with session.post(
-                        f"{self.base_url}/chat/completions",
-                        headers={
-                            "Authorization": f"Bearer {api_key}",
-                            "Content-Type": "application/json",
-                        },
-                        json=payload,
-                    ) as resp:
-                        resp.raise_for_status()
-                        data = await resp.json()
-                        return data["choices"][0]["message"]["content"].strip()
-
-            return await with_retry(_do_request, config=self._retry_config, operation_name="OpenAIProvider.generate")
-        finally:
-            if close_session:
-                await session.close()
+        return await _chat_completion_request(
+            base_url=self.base_url, api_key=api_key, model=self.generator_model,
+            messages=messages, max_tokens=max_tokens, temperature=temperature,
+            retry_config=self._retry_config, operation_name="OpenAIProvider.generate",
+            session=session,
+        )
 
     async def get_embedding(
         self, text: str, session: aiohttp.ClientSession
@@ -299,32 +271,19 @@ class OpenAIProvider:
     ) -> int:
         api_key = self._get_api_key()
         prompt = JUDGE_PROMPT_TEMPLATE.format(output_a=output_a, output_b=output_b)
+        messages = [{"role": "user", "content": prompt}]
 
-        async def _do_request():
-            async with asyncio.timeout(self._retry_config.timeout):
-                async with session.post(
-                    f"{self.base_url}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": self.generator_model,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "max_tokens": 5,
-                        "temperature": 0,
-                    },
-                ) as resp:
-                    resp.raise_for_status()
-                    data = await resp.json()
-                    raw = data["choices"][0]["message"]["content"].strip()
-                    try:
-                        score = int(raw)
-                        return max(0, min(10, score))
-                    except ValueError:
-                        return 5  # neutral fallback
-
-        return await with_retry(_do_request, config=self._retry_config, operation_name="OpenAIProvider.judge_divergence")
+        raw = await _chat_completion_request(
+            base_url=self.base_url, api_key=api_key, model=self.generator_model,
+            messages=messages, max_tokens=5, temperature=0,
+            retry_config=self._retry_config, operation_name="OpenAIProvider.judge_divergence",
+            session=session,
+        )
+        try:
+            score = int(raw)
+            return max(0, min(10, score))
+        except ValueError:
+            return 5  # neutral fallback
 
 
 class AnthropicProvider:
@@ -342,13 +301,9 @@ class AnthropicProvider:
         self._retry_config = retry_config
 
     def _get_api_key(self) -> str:
-        if not self.api_key:
-            raise EnvironmentError(
-                "ANTHROPIC_API_KEY environment variable not set.\n"
-                "Get a key at https://console.anthropic.com and run:\n"
-                "  export ANTHROPIC_API_KEY=your_key_here"
-            )
-        return self.api_key
+        return _get_api_key_or_raise(
+            self.api_key, "ANTHROPIC_API_KEY", "AnthropicProvider", "https://console.anthropic.com"
+        )
 
     async def generate(
         self,
