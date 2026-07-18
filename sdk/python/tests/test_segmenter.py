@@ -74,3 +74,53 @@ def test_mixed_prompt_detects_multiple_region_types():
     assert RegionType.PLAIN in region_types
     assert RegionType.BULLETS in region_types
     assert RegionType.JSON in region_types
+
+
+# ── New span tracking tests ──────────────────────────────────────────────────
+
+def test_segment_prompt_populates_char_spans():
+    """Verify char_start/char_end are populated for a multi-region prompt."""
+    prompt = (
+        "You are a helpful assistant.\n"
+        "- Always be polite\n"
+        "- Be concise"
+    )
+    phrases = segment_prompt(prompt)
+    # At least some phrases should have valid char_start
+    spans_populated = [p for p in phrases if p.char_start >= 0]
+    assert len(spans_populated) > 0
+    for p in spans_populated:
+        assert p.char_end > p.char_start
+        assert p.char_end <= len(prompt) + 1  # allow for edge cases
+
+
+def test_segment_source_text_matches_original_slice():
+    """original[char_start:char_end] == phrase.source_text for phrases with valid spans."""
+    prompt = "You are a helpful assistant. Always respond in a friendly tone."
+    phrases = segment_prompt(prompt)
+    for p in phrases:
+        if p.char_start >= 0 and p.source_text:
+            actual_slice = prompt[p.char_start:p.char_end]
+            assert actual_slice == p.source_text, (
+                f"Mismatch for phrase '{p.text}': "
+                f"source_text='{p.source_text}' vs slice='{actual_slice}'"
+            )
+
+
+def test_spans_cover_full_prompt():
+    """No gaps between phrase spans for a simple plain-text prompt."""
+    prompt = "You are a helpful assistant. Always respond concisely. Be accurate."
+    phrases = segment_prompt(prompt)
+    # All phrases should have valid spans
+    valid_phrases = [p for p in phrases if p.char_start >= 0]
+    assert len(valid_phrases) == len(phrases), "All phrases should have valid spans"
+    # Sort by start offset
+    sorted_phrases = sorted(valid_phrases, key=lambda p: p.char_start)
+    # Check no overlapping spans
+    for i in range(1, len(sorted_phrases)):
+        prev = sorted_phrases[i - 1]
+        curr = sorted_phrases[i]
+        assert curr.char_start >= prev.char_end, (
+            f"Overlap between phrase '{prev.text}' (end={prev.char_end}) "
+            f"and phrase '{curr.text}' (start={curr.char_start})"
+        )

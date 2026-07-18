@@ -4,10 +4,12 @@ Tests for compressor.py — covers the three pure functions:
 No LLM calls are made.
 """
 import pytest
+import warnings
 from promptlens.types import Phrase, SaliencyScore, RegionType
 from promptlens_agent.compressor import (
     _build_compression_prompt,
     _parse_compression_response,
+    _validate_coverage,
     reconstruct_from_original,
 )
 
@@ -242,3 +244,157 @@ def test_reconstruct_paraphrase_only_replaces_first_occurrence():
     result = reconstruct_from_original(original, diff)
     assert result.count("Assist users.") == 1
     assert result.count("Be helpful.") == 1
+
+
+# ── New ID-based parser tests ────────────────────────────────────────────────
+
+def test_parse_id_based_format():
+    """[#0][KEEP] text parses correctly by ID."""
+    scores = _scores("Always respond concisely.", "Be brief.", "Keep it short.")
+    response = (
+        "[#0][KEEP] Always respond concisely.\n"
+        "[#1][REMOVE] Be brief.\n"
+        "[#2][REWRITE] Keep it short. → Be short."
+    )
+    diff = _parse_compression_response(response, scores)
+    assert any(d["phrase"] == 0 and d["action"] == "keep" for d in diff)
+    assert any(d["phrase"] == 1 and d["action"] == "remove" for d in diff)
+    assert any(d["phrase"] == 2 and d["action"] == "rewrite" and d["result"] == "Be short." for d in diff)
+
+
+def test_parse_handles_skipped_phrase():
+    """LLM outputs 4 lines for 5 phrases, missing one defaults to KEEP."""
+    scores = _scores("A", "B", "C", "D", "E")
+    response = (
+        "[#0][KEEP] A\n"
+        "[#1][REMOVE] B\n"
+        "[#3][REMOVE] D\n"
+        "[#4][KEEP] E"
+    )
+    diff = _parse_compression_response(response, scores)
+    # Phrase #2 should default to KEEP
+    phrase_2 = next(d for d in diff if d["phrase"] == 2)
+    assert phrase_2["action"] == "keep"
+
+
+def test_parse_handles_extra_lines():
+    """LLM outputs 6 lines for 5 phrases, extras ignored."""
+    scores = _scores("A", "B", "C", "D", "E")
+    response = (
+        "[#0][KEEP] A\n"
+        "[#1][REMOVE] B\n"
+        "[#2][KEEP] C\n"
+        "[#3][KEEP] D\n"
+        "[#4][KEEP] E\n"
+        "[#99][KEEP] Extra line that should be ignored"
+    )
+    diff = _parse_compression_response(response, scores)
+    # Should have exactly 5 entries (one per score)
+    assert len(diff) == 5
+    phrase_ids = {d["phrase"] for d in diff}
+    assert phrase_ids == {0, 1, 2, 3, 4}
+
+
+def test_parse_handles_duplicate_ids():
+    """First occurrence wins for duplicate IDs."""
+    scores = _scores("Hello.", "World.")
+    response = (
+        "[#0][KEEP] Hello.\n"
+        "[#1][REMOVE] World.\n"
+        "[#1][KEEP] World."  # duplicate — should be ignored
+    )
+    diff = _parse_compression_response(response, scores)
+    phrase_1 = next(d for d in diff if d["phrase"] == 1)
+    assert phrase_1["action"] == "remove"
+
+
+def test_parse_fallback_to_content_match():
+    """Line without [#N] matched by text comparison to unmatched scores."""
+    scores = _scores("You are helpful.", "Be concise.")
+    response = (
+        "[#0][KEEP] You are helpful.\n"
+        "Be concise."  # no bracket prefix — should be content-matched
+    )
+    diff = _parse_compression_response(response, scores)
+    assert len(diff) == 2
+    phrase_1 = next(d for d in diff if d["phrase"] == 1)
+    assert phrase_1["action"] == "keep"
+
+
+def test_merge_into_target_removes_source():
+    """[#2][MERGE into #1] sets phrase 2 to remove (after merge semantics applied)."""
+    scores = _scores("A", "B", "C")
+    response = (
+        "[#0][KEEP] A\n"
+        "[#1][KEEP] B\n"
+        "[#2][MERGE into #1] C"
+    )
+    from promptlens_agent.compressor import _apply_merge_semantics
+    diff = _parse_compression_response(response, scores)
+    diff = _apply_merge_semantics(diff, scores)
+    phrase_2 = next(d for d in diff if d["phrase"] == 2)
+    assert phrase_2["action"] == "merge"
+    assert phrase_2["result"] == ""  # source is removed
+
+
+def test_merge_invalid_target_becomes_remove():
+    """Merge into removed phrase → warning + remove."""
+    scores = _scores("A", "B", "C")
+    response = (
+        "[#0][KEEP] A\n"
+        "[#1][REMOVE] B\n"
+        "[#2][MERGE into #1] C"
+    )
+    from promptlens_agent.compressor import _apply_merge_semantics
+    diff = _parse_compression_response(response, scores)
+    diff = _apply_merge_semantics(diff, scores)
+    phrase_2 = next(d for d in diff if d["phrase"] == 2)
+    assert phrase_2["action"] == "remove"
+    assert phrase_2["result"] == ""
+
+
+def test_reconstruct_offset_based():
+    """Prompt with duplicate phrases — only the correct one is modified using offsets."""
+    original = "Be helpful. Be concise. Be helpful."
+    # Create scores with char offsets that point to specific locations
+    p0 = Phrase(text="Be helpful.", index=0, region_type=RegionType.PLAIN, char_start=0, char_end=11, source_text="Be helpful.")
+    p1 = Phrase(text="Be concise.", index=1, region_type=RegionType.PLAIN, char_start=12, char_end=23, source_text="Be concise.")
+    p2 = Phrase(text="Be helpful.", index=2, region_type=RegionType.PLAIN, char_start=24, char_end=35, source_text="Be helpful.")
+    scores = [
+        SaliencyScore(phrase=p0, score=0.9, raw_shapley=0.9, disposition="keep"),
+        SaliencyScore(phrase=p1, score=0.05, raw_shapley=0.05, disposition="remove"),
+        SaliencyScore(phrase=p2, score=0.8, raw_shapley=0.8, disposition="keep"),
+    ]
+    # Remove only phrase 1 (the second "Be concise.")
+    diff = [
+        {"phrase": 0, "action": "keep", "original": "Be helpful.", "result": "Be helpful."},
+        {"phrase": 1, "action": "remove", "original": "Be concise.", "result": ""},
+        {"phrase": 2, "action": "keep", "original": "Be helpful.", "result": "Be helpful."},
+    ]
+    result = reconstruct_from_original(original, diff, scores)
+    # Both "Be helpful." should remain, "Be concise." removed
+    assert result.count("Be helpful.") == 2
+    assert "Be concise." not in result
+
+
+def test_reconstruct_legacy_fallback():
+    """scores=None triggers str.replace path (no warning since scores is None)."""
+    original = "You are a chef. You are helpful."
+    diff = [{"phrase": 0, "action": "remove", "original": "You are a chef.", "result": ""}]
+    result = reconstruct_from_original(original, diff, scores=None)
+    assert "You are a chef." not in result
+    assert "You are helpful." in result
+
+
+def test_validate_coverage_below_threshold():
+    """Returns < 0.8 when phrases missing from diff."""
+    scores = _scores("A", "B", "C", "D", "E")
+    # Only 3 of 5 matched
+    diff = [
+        {"phrase": 0, "action": "keep", "original": "A", "result": "A"},
+        {"phrase": 1, "action": "remove", "original": "B", "result": ""},
+        {"phrase": 2, "action": "keep", "original": "C", "result": "C"},
+    ]
+    coverage = _validate_coverage(diff, scores)
+    assert coverage < 0.8
+    assert coverage == pytest.approx(3 / 5)

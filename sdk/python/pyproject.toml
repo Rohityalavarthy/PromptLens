@@ -12,6 +12,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+openai = ["openai>=1.0"]
+anthropic = ["anthropic>=0.20"]
 dev = ["pytest", "pytest-asyncio"]
 
 [tool.hatch.build.targets.wheel]

@@ -4,6 +4,11 @@ from .types import (
 )
 from .shapley import run_shapley
 from .segmenter import segment_prompt
+from .provider import (
+    GenerationProvider, EmbeddingProvider, JudgeProvider, LLMProvider,
+    TogetherProvider, OpenAIProvider, AnthropicProvider,
+    configure_provider,
+)
 
 __all__ = [
     "run_shapley",
@@ -14,6 +19,14 @@ __all__ = [
     "SimilarityMode",
     "Phrase",
     "RegionType",
+    "GenerationProvider",
+    "EmbeddingProvider",
+    "JudgeProvider",
+    "LLMProvider",
+    "TogetherProvider",
+    "OpenAIProvider",
+    "AnthropicProvider",
+    "configure_provider",
 ]
 
 __version__ = "0.1.0"

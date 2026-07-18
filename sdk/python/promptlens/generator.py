@@ -3,6 +3,16 @@ import asyncio
 import aiohttp
 from typing import Optional
 from .types import SimilarityMode
+from .provider import (
+    GenerationProvider,
+    EmbeddingProvider,
+    JudgeProvider,
+    TogetherProvider,
+    configure_provider,
+    get_configured_provider,
+    get_configured_embedding_provider,
+    get_configured_judge_provider,
+)
 
 TOGETHER_API_BASE = "https://api.together.xyz/v1"
 
@@ -30,48 +40,14 @@ async def generate(
     session: Optional[aiohttp.ClientSession] = None,
 ) -> str:
     """Single LLM generation call. Returns response text."""
-    api_key = get_api_key()
-    messages = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": prompt})
-
-    payload = {
-        "model": GENERATOR_MODEL,
-        "messages": messages,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-    }
-
-    close_session = session is None
-    if session is None:
-        session = aiohttp.ClientSession()
-
-    try:
-        async with session.post(
-            f"{TOGETHER_API_BASE}/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json=payload,
-        ) as resp:
-            resp.raise_for_status()
-            data = await resp.json()
-            return data["choices"][0]["message"]["content"].strip()
-    finally:
-        if close_session:
-            await session.close()
+    provider = get_configured_provider()
+    return await provider.generate(prompt, system_prompt, temperature, max_tokens, session)
 
 
 async def get_embedding(text: str, session: aiohttp.ClientSession) -> list[float]:
-    """Get text embedding from Together AI. Returns float vector."""
-    api_key = get_api_key()
-    async with session.post(
-        f"{TOGETHER_API_BASE}/embeddings",
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json={"model": EMBEDDING_MODEL, "input": text},
-    ) as resp:
-        resp.raise_for_status()
-        data = await resp.json()
-        return data["data"][0]["embedding"]
+    """Get text embedding. Returns float vector."""
+    provider = get_configured_embedding_provider()
+    return await provider.get_embedding(text, session)
 
 
 async def judge_divergence(
@@ -80,38 +56,8 @@ async def judge_divergence(
     session: aiohttp.ClientSession,
 ) -> int:
     """
-    Ask Qwen to rate semantic divergence between two outputs.
+    Ask a judge model to rate semantic divergence between two outputs.
     Returns integer 0-10. 0 = identical meaning, 10 = completely different.
-    Uses different model family from generator (Qwen vs Llama) for independence.
     """
-    api_key = get_api_key()
-    prompt = f"""You are a semantic equivalence evaluator.
-
-Rate how semantically different these two responses are — not surface differences, but differences in meaning, recommendations, facts, or intent.
-
-Response A:
-{output_a}
-
-Response B:
-{output_b}
-
-Return a single integer from 0 to 10. 0 = identical meaning. 10 = completely different. Return only the number."""
-
-    async with session.post(
-        f"{TOGETHER_API_BASE}/chat/completions",
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json={
-            "model": JUDGE_MODEL,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 5,
-            "temperature": 0,
-        },
-    ) as resp:
-        resp.raise_for_status()
-        data = await resp.json()
-        raw = data["choices"][0]["message"]["content"].strip()
-        try:
-            score = int(raw)
-            return max(0, min(10, score))
-        except ValueError:
-            return 5  # neutral fallback
+    provider = get_configured_judge_provider()
+    return await provider.judge_divergence(output_a, output_b, session)
