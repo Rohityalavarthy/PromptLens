@@ -300,7 +300,7 @@ class TestCliExitCodes:
         report = _make_report(scores, prompt="Test prompt content.")
         mock_shapley.return_value = report
 
-        runner = CliRunner(mix_stderr=False)
+        runner = CliRunner()
         result = runner.invoke(cli, ["check", "--file", str(prompt_file), "--format", "json"])
         assert result.exit_code == 0
         # stdout should be valid JSON
@@ -318,7 +318,7 @@ class TestCliExitCodes:
         report = _make_report(scores, prompt="Low saliency content here.")
         mock_shapley.return_value = report
 
-        runner = CliRunner(mix_stderr=False)
+        runner = CliRunner()
         result = runner.invoke(cli, ["check", "--file", str(prompt_file), "--format", "sarif"])
         # exit_code 1 because redundancy > 20%
         assert result.exit_code == 1

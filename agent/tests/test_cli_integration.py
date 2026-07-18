@@ -117,7 +117,7 @@ class TestBatchMode:
 
     def test_batch_mode_json_output(self, tmp_path):
         """Batch mode with JSON format outputs expected structure."""
-        batch_runner = CliRunner(mix_stderr=False)
+        batch_runner = CliRunner()
         mock_discovery = MagicMock()
         mock_discovery.confidence = 0.9
         mock_discovery.prompt_text = "You are helpful."
@@ -135,7 +135,10 @@ class TestBatchMode:
                             "compress", "--batch", "--repo", str(tmp_path), "--format", "json"
                         ])
                         assert result.exit_code == 0
-                        data = json.loads(result.output)
+                        # Extract JSON from output (may contain stderr progress lines mixed in)
+                        output = result.output
+                        json_start = output.index("{")
+                        data = json.loads(output[json_start:])
                         assert data["version"] == "1.0"
                         assert data["command"] == "compress"
                         assert data["mode"] == "batch"
