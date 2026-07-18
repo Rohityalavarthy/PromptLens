@@ -1,62 +1,116 @@
 # PromptLens
 
-**Find the dead weight in your LLM prompts — and cut it safely.**
+**Evidence-based prompt engineering for production LLM applications.**
 
-PromptLens uses Shapley-value attribution to score every phrase in your system prompts by how much it actually changes model output. Phrases that score near zero are candidates for removal. Phrases that score high are load-bearing — don't touch them.
+PromptLens uses [Shapley-value attribution](https://en.wikipedia.org/wiki/Shapley_value) to score every phrase in your system prompts by how much it actually changes model output. Low-scoring phrases are dead weight. High-scoring phrases are load-bearing. The CLI agent finds prompts across your codebase, audits them, compresses them safely, and validates that behavior doesn't change — with full explainability at every step.
 
-The CLI agent finds all your prompts automatically, audits them, and can compress them while running empirical validation to make sure the behaviour doesn't change.
+```bash
+pip install -e sdk/python && pip install -e agent
+export TOGETHER_API_KEY=your_key_here   # free $1 credit at together.ai
+promptlens audit --repo . --format json
+```
 
-**Live web tool (paste-and-go):** https://rohityalavarthy.github.io/PromptLens
+**Live web tool (no install):** https://rohityalavarthy.github.io/PromptLens
 
 ---
 
-## Quickstart
+## Table of Contents
+
+- [Why PromptLens](#why-promptlens)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [CLI Reference](#cli-reference)
+- [Configuration](#configuration)
+- [Multi-Provider Support](#multi-provider-support)
+- [CI Integration](#ci-integration)
+- [Python SDK](#python-sdk)
+- [How Attribution Works](#how-attribution-works)
+- [Web Tool](#web-tool)
+- [Development](#development)
+- [License](#license)
+
+---
+
+## Why PromptLens
+
+Most prompt optimization is guesswork. You shorten a prompt, eyeball a few outputs, and hope nothing breaks. PromptLens replaces that with measurement:
+
+- **Quantified impact** — Every phrase gets a 0–1 score based on its actual contribution to model output across multiple test inputs.
+- **Safe compression** — Automated rewriting with empirical validation. If the compressed prompt changes behavior beyond your threshold, it's rejected.
+- **Full explainability** — JSON/SARIF reports with per-phrase rationale, validation evidence, and cost estimates. Suitable for compliance and audit trails.
+- **CI-ready** — Run in GitHub Actions, get SARIF results in your code scanning dashboard, fail PRs that introduce bloated prompts.
+
+---
+
+## Installation
+
+**Requirements:** Python 3.11+
 
 ```bash
-# 1. Install
+# From source
+git clone https://github.com/Rohityalavarthy/PromptLens.git
+cd PromptLens
 pip install -e sdk/python
 pip install -e agent
 
-# 2. Set your API key (Together AI — free $1 credit at together.ai)
-export TOGETHER_API_KEY=your_key_here
-
-# 3. Check a single prompt file
-promptlens check --file src/prompts/system.txt
-
-# 4. Audit your whole repo
-promptlens audit --repo .
-
-# 5. Compress a bloated prompt
-promptlens compress --file src/prompts/system.txt
+# Verify
+promptlens --help
 ```
 
-Requires Python 3.11+.
+**API key** (one of):
+```bash
+export TOGETHER_API_KEY=...    # Together AI (default provider)
+export OPENAI_API_KEY=...      # OpenAI
+export ANTHROPIC_API_KEY=...   # Anthropic (generation only, no semantic mode)
+```
 
 ---
 
-## CLI Agent
+## Quick Start
 
-### `check` — fast pre-commit scan
+```bash
+# Check a single prompt file for redundancy
+promptlens check --file prompts/system.txt
 
-Runs a quick saliency analysis on a single prompt file and warns you if more than 20% looks redundant. Fast enough to run before every commit.
+# Audit all prompts in your codebase
+promptlens audit --repo .
+
+# Compress a prompt (with validation)
+promptlens compress --file prompts/system.txt
+
+# Estimate cost before running
+promptlens compress --file prompts/system.txt --dry-run
+
+# Batch compress all discovered prompts
+promptlens compress --batch --repo .
+
+# CI mode: JSON output, non-interactive, proper exit codes
+promptlens audit --repo . --ci
+```
+
+---
+
+## CLI Reference
+
+### `promptlens check` — Single prompt analysis
+
+Runs Shapley analysis on one prompt and reports saliency scores. Fast enough for pre-commit hooks.
 
 ```bash
 promptlens check --file src/prompts/system.txt
 ```
 
 **Example output:**
-
 ```
 📋 PromptLens Analysis — src/prompts/system.txt
 ────────────────────────────────────────────────────
   Phrases analysed : 5
   Token estimate   : 94
-  Test inputs used : 3
   Confidence       : 0.88
   Est. redundancy  : 31%
 
   PHRASE                                       SCORE  IMPACT
-  ──────────────────────────────────────────── ────── ─────────────────────────
+  ──────────────────────────────────────────── ────── ──────────────────
   Always respond concisely.                     0.91  ████████████████████
   Use bullet points when listing items.         0.54  ████████████
   Format your answer in Markdown.               0.42  █████████
@@ -64,216 +118,236 @@ promptlens check --file src/prompts/system.txt
   You are a helpful assistant.                  0.08  █
 
   ⚠  Redundancy warning: 31% of tokens score below threshold (0.15)
-  Candidates for compression: 2 phrases / 29 tokens
 ```
 
-**Flags:**
-
 | Flag | Default | Description |
-|---|---|---|
+|------|---------|-------------|
 | `--file, -f` | required | Path to the prompt file |
 | `--saliency-threshold` | `0.15` | Phrases below this score are flagged |
-| `--semantic` | off | Use embedding similarity (requires Together AI key) |
+| `--m-samples` | `20` | Monte Carlo walks (higher = more precise) |
+| `--semantic` | off | Use embedding similarity instead of trigram |
+| `--format` | `terminal` | Output format: `terminal`, `json`, or `sarif` |
+| `--ci` | off | Non-interactive mode (JSON output, no prompts) |
+
+**Exit codes:** `0` = clean, `1` = redundancy > 20%, `2` = error.
 
 ---
 
-### `audit` — full repo analysis
+### `promptlens audit` — Full codebase scan
 
-Walks your entire codebase, finds every LLM API call, extracts the system prompts, and runs a saliency analysis on each one. Produces a ranked summary showing which prompts have the most redundancy.
+Discovers all LLM prompts across your codebase and runs saliency analysis on each.
 
 ```bash
-# Scan the whole repo
 promptlens audit --repo .
-
-# Scan a single file
-promptlens audit --file src/api/openai_handler.py
-
-# Use your own test inputs for more realistic scoring
-promptlens audit --repo . --test-inputs tests/inputs.jsonl
+promptlens audit --repo . --format sarif > results.sarif
 ```
 
-**Example output:**
+**What it discovers:**
 
-```
-🔍 PromptLens Agent — Audit Complete
-════════════════════════════════════════════════════
-  Prompts found    : 5
-  Total tokens     : 2,341
-  Candidate tokens : 418 (18% of total)
-
-  FILE                                   TOKENS  REDUNDANCY
-  ─────────────────────────────────────── ────── ──────────
-  src/api/openai_handler.py                  234      42%
-  src/prompts/search.txt                     189      12%
-  src/llm/anthropic_wrapper.py               127       8%
-  src/agents/summarizer.py                    89       4%
-
-  Run promptlens compress --file <path> to compress a specific prompt.
-```
-
-**Flags:**
+| Language | Patterns |
+|----------|----------|
+| Python | `messages=[{"role": "system", ...}]`, `system="..."` (Anthropic), `SystemMessage(content=...)` (LangChain), f-strings, `.format()`, concatenation, variable assignments |
+| TypeScript/JS | `role: "system"` in messages arrays, `system:` kwargs, template literals, `const SYSTEM_PROMPT = ...` |
+| YAML/Config | Keys named `system_prompt`, `prompt`, `template`, `system_message`, `instructions` |
+| Template files | `.jinja2`, `.j2`, `.prompt` files in `prompts/` or `templates/` directories |
 
 | Flag | Default | Description |
-|---|---|---|
-| `--repo, -r` | `.` | Repo root to scan |
-| `--file, -f` | — | Analyse a single file instead of scanning |
+|------|---------|-------------|
+| `--repo, -r` | `.` | Repository root to scan |
+| `--file, -f` | — | Analyse a single file instead |
 | `--test-inputs` | — | `.jsonl` or `.txt` file of test inputs |
-| `--m-samples` | `20` | Monte Carlo walks for Shapley (higher = more precise) |
-| `--saliency-threshold` | `0.15` | Score below which a phrase is a compression candidate |
-| `--semantic` | off | Use embedding similarity instead of trigram |
-
-**What it finds:**
-
-The agent uses AST analysis to detect LLM API calls across all common frameworks:
-
-| Framework | Detected patterns |
-|---|---|
-| OpenAI | `openai.chat.completions.create`, `client.chat.completions.create` |
-| Anthropic | `client.messages.create`, `anthropic.messages.create` |
-| LangChain | `ChatOpenAI`, `ChatAnthropic`, `LLMChain`, `PromptTemplate` |
-| AWS Bedrock | `bedrock_runtime.invoke_model`, `BedrockChat` |
-
-It resolves prompts from three sources:
-- **Literal strings** — `messages=[{"role": "system", "content": "You are..."}]`
-- **Variable assignments** — `SYSTEM_PROMPT = "..."` then used in the call
-- **File reads** — `open("prompts/system.txt").read()` or `Path(...).read_text()`
+| `--m-samples` | `20` | Monte Carlo walks for Shapley |
+| `--saliency-threshold` | `0.15` | Score below which a phrase is flagged |
+| `--semantic` | off | Use embedding similarity |
+| `--format` | `terminal` | Output: `terminal`, `json`, or `sarif` |
+| `--ci` | off | Non-interactive CI mode |
 
 ---
 
-### `compress` — analyse, rewrite, validate
+### `promptlens compress` — Analyse, rewrite, validate
 
-The full pipeline: scores your prompt, sends low-saliency phrases to an LLM rewriter with explicit instructions, validates that the compressed prompt produces similar outputs, and retries if it doesn't.
+The full pipeline: score → rewrite → validate → retry. Produces a `.suggested` file with the compressed prompt.
 
 ```bash
 # Basic compression
-promptlens compress --file src/prompts/system.txt
+promptlens compress --file prompts/system.txt
 
 # Tighter quality gate
-promptlens compress --file src/prompts/system.txt --threshold 0.10
+promptlens compress --file prompts/system.txt --threshold 0.10
 
-# Semantic similarity + your own test inputs
-promptlens compress --file src/prompts/system.txt --semantic --test-inputs tests/inputs.jsonl
+# With your own test inputs for better accuracy
+promptlens compress --file prompts/system.txt --test-inputs tests/inputs.jsonl
 
-# Review output then optionally apply in-place
-promptlens compress --file src/prompts/system.txt --apply
+# Apply in-place after review
+promptlens compress --file prompts/system.txt --apply
+
+# Batch: compress all discovered prompts
+promptlens compress --batch --repo .
+
+# Estimate cost without running
+promptlens compress --file prompts/system.txt --dry-run
 ```
 
-**How it works, step by step:**
+**How it works:**
 
-1. **Score** — Runs Shapley analysis to get a 0–1 impact score for every phrase.
-2. **Label** — Phrases below the saliency threshold get labeled `[COMPRESS]`; others get `[KEEP]`. Each label includes the exact score so the rewriter knows how aggressively to act.
-3. **Rewrite** — Sends the labeled prompt to a Qwen rewriter with a score-based decision table:
-   - `0.00–0.05` → REMOVE (if covered elsewhere in the prompt)
+1. **Score** — Shapley analysis assigns a 0–1 impact score to every phrase.
+2. **Label** — Phrases below the saliency threshold are labeled `[COMPRESS]` with their score.
+3. **Rewrite** — An LLM rewrites labeled phrases using a score-based decision table:
+   - `0.00–0.05` → REMOVE (if covered elsewhere)
    - `0.05–0.10` → REMOVE, MERGE, or REWRITE
    - `0.10–threshold` → MERGE or REWRITE only
    - `≥ threshold` → PARAPHRASE only (no structural change)
-4. **Validate** — Runs both the original and compressed prompts against all test inputs, measures output divergence. Computes a verdict:
-   - **PASS** — safe to adopt
-   - **MARGINAL** — spot-check outputs before committing
-   - **REVIEW** — differences are significant; read carefully
-   - **FAIL** — do not apply without thorough manual review
-5. **Retry** — If validation fails, the agent reinstates the modified phrase with the highest Shapley score and re-validates. Up to 3 retries.
-6. **Write** — Result is written to `<file>.suggested`. Your original is never touched unless you use `--apply` and confirm.
+4. **Validate** — Runs both prompts against test inputs and measures output divergence.
+5. **Retry** — If validation fails, reinstates the highest-scoring modified phrase and re-validates (up to 3 retries).
+6. **Write** — Result written to `<file>.suggested`. Original is never touched unless you use `--apply`.
 
-**Example output:**
-
-```
-✂  Compression Result
-────────────────────────────────────────────────────
-  Validation       : ✓ PASS
-  Max divergence   : 0.087
-  Original tokens  : 127
-  Compressed tokens: 89
-  Token reduction  : 38 tokens (30%)
-
-  Changes:
-    🗑  Redundant phrase covered elsewhere
-    ✏️  You are extremely helpful and thorough in your responses. → Be thorough.
-    ↺  Please assist users in a polite and professional manner. → Be polite and professional.
-
-  Compressed prompt written to: src/prompts/system.txt.suggested
-```
-
-**Review the diff before applying:**
-
-```bash
-diff src/prompts/system.txt src/prompts/system.txt.suggested
-```
-
-**Flags:**
+**Validation verdicts:**
+- **PASS** — Safe to adopt.
+- **MARGINAL** — Spot-check outputs before committing.
+- **REVIEW** — Differences are significant; read carefully.
+- **FAIL** — Do not apply without thorough manual review.
 
 | Flag | Default | Description |
-|---|---|---|
-| `--file, -f` | required | Prompt file to compress |
-| `--threshold` | `0.15` | Max output divergence allowed during validation |
-| `--saliency-threshold` | auto | Phrases below this get labeled COMPRESS. Defaults to `min(threshold, 0.50)` |
-| `--test-inputs` | — | `.jsonl` (`{"input": "..."}`) or `.txt` (one per line) |
-| `--m-samples` | `20` | Monte Carlo walks for Shapley |
-| `--semantic` | off | Use embeddings for divergence measurement |
-| `--apply` | off | After writing `.suggested`, prompt to overwrite original in-place |
+|------|---------|-------------|
+| `--file, -f` | — | Prompt file to compress |
+| `--batch` | off | Compress all discovered prompts |
+| `--repo, -r` | `.` | Repository root (for `--batch`) |
+| `--threshold` | `0.15` | Max output divergence allowed |
+| `--saliency-threshold` | auto | Phrases below this get labeled COMPRESS |
+| `--test-inputs` | — | `.jsonl` or `.txt` test inputs |
+| `--m-samples` | `20` | Monte Carlo walks |
+| `--semantic` | off | Use embeddings for divergence |
+| `--apply` | off | Overwrite original after confirmation |
+| `--dry-run` | off | Estimate cost without running |
+| `--format` | `terminal` | Output: `terminal`, `json`, or `sarif` |
+| `--ci` | off | Non-interactive CI mode |
 
-**Tip on test inputs:** If you don't provide a `--test-inputs` file, the agent falls back to three generic inputs. The saliency scores will be less accurate. For production prompts, always pass representative real-world inputs — your results will be much sharper.
-
----
-
-## Test input file formats
-
-**JSONL** (one JSON object per line):
-```jsonl
-{"input": "Summarize the following article in three sentences."}
-{"input": "What is the capital of France?"}
-{"input": "Write a Python function that sorts a list."}
-```
-
-**Plain text** (one input per line):
-```
-Summarize the following article in three sentences.
-What is the capital of France?
-Write a Python function that sorts a list.
-```
+**Exit codes:** `0` = PASS/MARGINAL, `1` = REVIEW/FAIL, `2` = error.
 
 ---
 
-## Similarity modes
+## Configuration
 
-Both `check`, `audit`, and `compress` support two ways to measure output divergence:
+PromptLens supports persistent configuration via `.promptlensrc.toml` (searched up from cwd) or `pyproject.toml`:
 
-**Standard (default):** Character trigram cosine distance. No extra API calls. Fast and works offline. Good for prompts where output wording is important.
+**.promptlensrc.toml:**
+```toml
+provider = "together"        # together | openai | anthropic
+model = ""                   # empty = provider default
+threshold = 0.15
+saliency_threshold = 0.15
+m_samples = 20
+semantic = false
+output_format = "terminal"   # terminal | json | sarif
+verbose = false
+```
 
-**Semantic (`--semantic`):** Embedding cosine distance via `nomic-ai/nomic-embed-text-v1.5` (Together AI). Captures meaning-level change — rewording the same idea doesn't register as divergence. Use this when you care about semantic equivalence, not exact phrasing.
+**pyproject.toml:**
+```toml
+[tool.promptlens]
+provider = "openai"
+model = "gpt-4o-mini"
+threshold = 0.10
+output_format = "json"
+```
+
+**Precedence:** CLI flags > environment variables > `.promptlensrc.toml` > `pyproject.toml` > defaults.
+
+**Environment variables:**
+```bash
+PROMPTLENS_PROVIDER=openai
+PROMPTLENS_THRESHOLD=0.10
+PROMPTLENS_FORMAT=json
+PROMPTLENS_VERBOSE=true
+PROMPTLENS_M_SAMPLES=50
+```
 
 ---
 
-## M-samples and speed
+## Multi-Provider Support
 
-All three commands accept `--m-samples` to control the Shapley sampling budget.
+PromptLens supports three LLM providers with different capability levels:
 
-| Value | Use case | Est. API calls (N=10 phrases) |
-|---|---|---|
-| `3` | Pre-commit, instant feedback | ~6–10 |
-| `20` | Default — balanced quality | ~20–40 |
-| `50` | High-confidence audit | ~50–80 |
+| Provider | Generation | Embeddings | Semantic Mode | Notes |
+|----------|:----------:|:----------:|:-------------:|-------|
+| Together AI | ✓ | ✓ | ✓ | Default. Free $1 credit. Llama 3.3 70B + nomic-embed. |
+| OpenAI | ✓ | ✓ | ✓ | GPT-4o-mini + text-embedding-3-small. |
+| Anthropic | ✓ | — | — | Claude Sonnet. Generation only; `--semantic` not supported. |
 
-For prompts with N ≤ 4 phrases, PromptLens computes **exact** Shapley values (all 2^N coalitions) regardless of `--m-samples`. Coalition outputs are cached — concurrent walks that hit the same subset share a single in-flight API call.
+Configure via `.promptlensrc.toml`, `pyproject.toml`, or environment variables:
 
-All generation calls use `temperature: 0.0` — determinism is required for stable divergence measurement.
+```bash
+# Use OpenAI
+export OPENAI_API_KEY=sk-...
+promptlens audit --repo .   # with provider = "openai" in config
+
+# Or override per-run via env
+PROMPTLENS_PROVIDER=openai promptlens check --file prompt.txt
+```
+
+All providers include automatic retry with exponential backoff, rate-limit awareness (respects `Retry-After` headers), and per-request timeouts.
+
+---
+
+## CI Integration
+
+### GitHub Actions
+
+Use the built-in composite action:
+
+```yaml
+# .github/workflows/promptlens.yml
+name: Prompt Audit
+on: [pull_request]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./agent
+        with:
+          together-api-key: ${{ secrets.TOGETHER_API_KEY }}
+          format: sarif
+          threshold: '0.15'
+```
+
+This installs PromptLens, runs `promptlens audit --repo . --ci`, and uploads SARIF results to GitHub's code scanning dashboard.
+
+### Manual CI setup
+
+```bash
+pip install promptlens-sdk promptlens-agent
+promptlens audit --repo . --format sarif --ci > results.sarif
+# Upload results.sarif to your code scanning tool
+```
+
+### Exit codes for CI
+
+| Code | Meaning |
+|------|---------|
+| `0` | No issues found / compression passed |
+| `1` | Issues found (redundancy > 20%) or compression failed validation |
+| `2` | Runtime error |
+
+### Structured output formats
+
+**JSON** (`--format json`): Machine-readable output with per-phrase scores, dispositions, character offsets, and explainability rationale.
+
+**SARIF** (`--format sarif`): [Static Analysis Results Interchange Format](https://sarifweb.azurewebsites.net/) v2.1.0. Each low-saliency phrase is a finding with file location, severity level, and actionable message. Compatible with GitHub Code Scanning, Azure DevOps, and other SARIF consumers.
 
 ---
 
 ## Python SDK
 
-If you want to run Shapley attribution from your own code:
-
-```bash
-pip install -e sdk/python
-```
+For programmatic access:
 
 ```python
 import asyncio
 from promptlens import run_shapley, SimilarityMode
 
 report = asyncio.run(run_shapley(
-    prompt="You are a helpful assistant. Always respond concisely. Use bullet points when listing items.",
+    prompt="You are a helpful assistant. Always respond concisely. Use bullet points.",
     test_inputs=["What are the benefits of exercise?"],
     m_samples=20,
     mode=SimilarityMode.STANDARD,
@@ -289,19 +363,68 @@ for score in sorted(report.scores, key=lambda s: s.score, reverse=True):
 0.12  You are a helpful assistant.
 ```
 
-**`SaliencyReport` fields:**
-- `scores` — list of `SaliencyScore`: `.score` (0–1), `.raw_shapley`, `.disposition` (`keep`/`remove`)
-- `phrases` — segmented phrase list
-- `token_count`, `redundancy_fraction`, `compression_candidate_tokens`
-- `confidence`, `m_samples`, `test_inputs_used`
+### Provider configuration
+
+```python
+from promptlens import TogetherProvider, OpenAIProvider, configure_provider
+
+# Switch to OpenAI
+configure_provider(OpenAIProvider(api_key="sk-..."))
+
+# Or use separate providers for different capabilities
+from promptlens import AnthropicProvider
+configure_provider(
+    AnthropicProvider(api_key="sk-ant-..."),           # generation
+    embedding_provider=OpenAIProvider(api_key="sk-...") # embeddings
+)
+```
+
+### Key types
+
+```python
+SaliencyReport:
+    scores: list[SaliencyScore]    # .score (0–1), .raw_shapley, .disposition
+    phrases: list[Phrase]          # .text, .char_start, .char_end, .region_type
+    token_count: int
+    redundancy_fraction: float
+    compression_candidate_tokens: int
+    confidence: float
+
+Phrase:
+    text: str                      # display text
+    index: int
+    char_start: int                # character offset in original prompt
+    char_end: int
+    source_text: str               # exact original slice
+    region_type: RegionType        # PLAIN, BULLETS, JSON, XML_TAGGED, CODE_BLOCK
+    atomic: bool                   # if True, never removed (e.g. code blocks)
+```
 
 ---
 
-## Web tool
+## How Attribution Works
 
-Paste a prompt directly in the browser and get it back colour-coded by impact. No install, no API key to configure in a terminal.
+Standard perturbation methods (leave-one-out, ablation) test phrases in isolation and miss interactions. A phrase can look useless alone but be essential when combined with others.
 
-**Run at:** https://rohityalavarthy.github.io/PromptLens
+[Shapley values](https://en.wikipedia.org/wiki/Shapley_value) fix this. The Shapley value for a phrase is its **average marginal contribution across all possible coalitions** — the only attribution method satisfying all four fairness axioms (efficiency, symmetry, dummy, additivity).
+
+**Computation:**
+- **N ≤ 4 phrases:** Exact computation (all 2^N subsets).
+- **N > 4 phrases:** Monte Carlo sampling with M random coalition walks, concurrency-capped at 5.
+- **Caching:** Coalition outputs are cached — concurrent walks hitting the same subset share a single API call.
+- **Determinism:** All generation uses `temperature: 0.0` for stable divergence measurement.
+
+**Similarity modes:**
+- **Standard (default):** Character trigram cosine distance. No extra API calls. Fast.
+- **Semantic (`--semantic`):** Embedding cosine distance. Captures meaning-level change — rewording the same idea doesn't register as divergence.
+
+---
+
+## Web Tool
+
+Paste a prompt in the browser and get it back colour-coded by impact. No install required.
+
+**URL:** https://rohityalavarthy.github.io/PromptLens
 
 **Run locally:**
 ```bash
@@ -309,63 +432,55 @@ cd web && python3 -m http.server 8080
 # open http://localhost:8080
 ```
 
-### Providers
-
-| Provider | Saliency | Semantic similarity | Notes |
-|---|---|---|---|
-| Groq | ✓ | — | Free tier, no credit card. Fastest for saliency. |
-| Together AI | ✓ | ✓ (nomic-embed) | $1 free credit. Enables embedding-based similarity. |
-| OpenAI | ✓ | ✓ (text-embedding-3-small) | GPT-4o mini for analysis, embeddings for semantic mode. |
-| Anthropic | ✓ | — | Claude Haiku. No embedding endpoint; falls back to trigram similarity. |
-
-Keys are stored in `localStorage` — they never leave your browser.
-
-### Compress
-
-After running an analysis, a **Compress** button appears in the results panel. It removes all phrases scoring below your chosen threshold and runs a single LLM pass to fix any structural issues left behind (broken JSON, orphaned XML tags, incomplete bullet lists) — without rephrasing or adding back content.
-
-**Flow:**
-1. Run analysis → phrases are scored and colour-coded
-2. Click **Compress** → set the **Remove below** threshold (default `< 0.15`)
-3. A structural cleanup LLM call patches formatting only
-4. Review the diff — every removed phrase is listed
-5. Adjust the threshold and click **Recompress** to iterate
-6. Click **Apply** to copy the compressed prompt back into the editor, or **Discard** to cancel
-
-Atomic phrases (code blocks, XML-tagged sections) are never removed regardless of score.
-
-### Other features
-
-- **Heatmap / Table view** — toggle between the colour-coded heatmap and a sortable score table
-- **Threshold filter** — slider to dim phrases below a score, focusing the heatmap on high-impact content
-- **Copy / Export** — copy results as a markdown table, or export full JSON (phrases, scores, settings, baseline response)
-- **Share** — encodes the current analysis state into a URL fragment; anyone with the link can restore the exact view
-- **Run history** — last 8 analyses stored in `localStorage`; accessible via the History dropdown next to the run button
-- **Auto-save** — prompt text is saved to `localStorage` on every keystroke and restored on reload
-
----
-
-## How attribution works
-
-Standard perturbation methods (leave-one-out, ablation) test phrases in isolation and miss interactions. A phrase can look useless alone but be essential when combined with others.
-
-Shapley values fix this. The Shapley value for a phrase is its **average marginal contribution across all possible coalitions of the other phrases** — the only attribution method satisfying all four fairness axioms when features interact (efficiency, symmetry, dummy, additivity).
-
-For N ≤ 4 phrases: exact computation (all 2^N subsets). For N > 4: Monte Carlo sampling with M random coalition walks, concurrency-capped at 5. Coalition cache deduplicates repeated subset calls across walks.
+**Features:**
+- Heatmap and table views with sortable scores
+- Threshold slider to focus on high-impact content
+- In-browser compression with structural cleanup
+- Copy as markdown table or export full JSON
+- Shareable URL (encodes analysis state in fragment)
+- Run history (last 8 analyses in localStorage)
+- Supports Groq, Together AI, OpenAI, and Anthropic (keys stored in localStorage only)
 
 ---
 
 ## Development
 
 ```bash
-# SDK — 19 tests, all offline
-cd sdk/python && pytest tests/ -v
+# Install in development mode
+pip install -e sdk/python
+pip install -e "agent[dev]"
 
-# Agent — offline tests
-cd agent && pytest tests/ -v
+# Run tests (167 total, all offline — no API keys needed)
+cd sdk/python && pytest tests/ -v    # 41 tests
+cd agent && pytest tests/ -v         # 126 tests
 ```
 
-No live API calls in the test suite.
+### Project structure
+
+```
+PromptLens/
+├── sdk/python/promptlens/       # Core SDK
+│   ├── shapley.py               # Shapley value computation
+│   ├── segmenter.py             # Prompt segmentation with span tracking
+│   ├── similarity.py            # Trigram + embedding similarity
+│   ├── generator.py             # LLM generation (delegates to providers)
+│   ├── provider.py              # Provider abstraction (Together/OpenAI/Anthropic)
+│   ├── resilience.py            # Retry, timeout, backoff
+│   └── types.py                 # Phrase, Region, SaliencyScore, etc.
+├── agent/promptlens_agent/      # CLI Agent
+│   ├── cli.py                   # Click CLI (check/audit/compress)
+│   ├── discovery.py             # Python AST-based prompt discovery
+│   ├── discovery_ts.py          # TypeScript/JavaScript discovery
+│   ├── discovery_config.py      # YAML/template discovery
+│   ├── compressor.py            # LLM compression with ID-based parsing
+│   ├── validator.py             # Divergence validation loop
+│   ├── formatters.py            # JSON/SARIF output formatters
+│   ├── config.py                # Configuration file loading
+│   ├── cost_estimator.py        # API cost estimation
+│   └── reporter.py              # Terminal output formatting
+├── agent/action.yml             # GitHub Actions composite action
+└── web/                         # Browser-based tool
+```
 
 ---
 
