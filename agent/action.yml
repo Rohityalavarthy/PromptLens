@@ -1,0 +1,51 @@
+name: 'PromptLens Audit'
+description: 'Run PromptLens saliency audit on LLM prompt files'
+branding:
+  icon: 'search'
+  color: 'blue'
+inputs:
+  threshold:
+    description: 'Saliency threshold (phrases below this are flagged)'
+    default: '0.15'
+  format:
+    description: 'Output format (json or sarif)'
+    default: 'sarif'
+  together-api-key:
+    description: 'Together AI API key'
+    required: true
+  python-version:
+    description: 'Python version to use'
+    default: '3.11'
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+    - name: Install PromptLens
+      run: pip install promptlens-sdk promptlens-agent
+      shell: bash
+    - name: Run audit
+      run: |
+        # Validate inputs
+        case "$PROMPTLENS_FORMAT" in
+          json|sarif) ;;
+          *) echo "Error: format must be 'json' or 'sarif'" >&2; exit 2;;
+        esac
+        if ! echo "$PROMPTLENS_THRESHOLD" | grep -qE '^[0-9]+\.?[0-9]*$'; then
+          echo "Error: threshold must be numeric" >&2; exit 2
+        fi
+        promptlens audit --repo . \
+          --format "$PROMPTLENS_FORMAT" \
+          --saliency-threshold "$PROMPTLENS_THRESHOLD" \
+          --ci > "promptlens-results.$PROMPTLENS_FORMAT"
+      shell: bash
+      env:
+        TOGETHER_API_KEY: ${{ inputs.together-api-key }}
+        PROMPTLENS_FORMAT: ${{ inputs.format }}
+        PROMPTLENS_THRESHOLD: ${{ inputs.threshold }}
+    - name: Upload SARIF
+      uses: github/codeql-action/upload-sarif@v3
+      if: ${{ inputs.format == 'sarif' && always() }}
+      with:
+        sarif_file: promptlens-results.sarif

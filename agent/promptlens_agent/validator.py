@@ -1,9 +1,14 @@
+import asyncio
+import logging
+
 import aiohttp
 from collections.abc import Callable
 from promptlens import SaliencyReport, SimilarityMode
 from promptlens.generator import generate
 from promptlens.similarity import compute_divergences
 from .compressor import reconstruct_from_original
+
+logger = logging.getLogger("promptlens.validator")
 
 MAX_RETRIES = 3
 
@@ -40,6 +45,8 @@ def _pick_phrase_to_reinstate(diff: list[dict], report: SaliencyReport) -> bool:
     have caused output divergence first — it had the most impact when present,
     so removing or rewriting it is the riskiest change.
 
+    For merge pairs: when reinstating a merged phrase, also reinstate its merge target.
+
     Returns True if a phrase was reinstated, False if every phrase is already kept.
     """
     candidates = []
@@ -61,6 +68,16 @@ def _pick_phrase_to_reinstate(diff: list[dict], report: SaliencyReport) -> bool:
     _, entry = candidates[0]
     entry["action"] = "keep"
     entry["result"] = entry["original"]
+
+    # If this was a merge entry, also reinstate its merge target
+    merge_target = entry.get("merge_target")
+    if merge_target is not None:
+        for other_entry in diff:
+            if other_entry.get("phrase") == merge_target and other_entry["action"] != "keep":
+                other_entry["action"] = "keep"
+                other_entry["result"] = other_entry["original"]
+                break
+
     return True
 
 
@@ -91,7 +108,8 @@ async def validate_compression(
 
         for _ in range(MAX_RETRIES):
             worst_divergence = await _run_validation(
-                original_prompt, current_compressed, test_inputs, mode, session, on_progress
+                original_prompt, current_compressed, test_inputs, mode, session, on_progress,
+                threshold=threshold,
             )
 
             if worst_divergence <= threshold:
@@ -101,11 +119,12 @@ async def validate_compression(
             if not reinstated:
                 break
 
-            current_compressed = reconstruct_from_original(original_prompt, current_diff)
+            current_compressed = reconstruct_from_original(original_prompt, current_diff, report.scores)
 
         # Final measurement after all reinstatements
         worst_divergence = await _run_validation(
-            original_prompt, current_compressed, test_inputs, mode, session, on_progress
+            original_prompt, current_compressed, test_inputs, mode, session, on_progress,
+            threshold=threshold,
         )
         verdict = _compute_verdict(worst_divergence, threshold)
         return verdict, worst_divergence, current_compressed
@@ -118,16 +137,44 @@ async def _run_validation(
     mode: SimilarityMode,
     session: aiohttp.ClientSession,
     on_progress: Callable[[int, int], None] | None = None,
+    threshold: float = 0.15,
 ) -> float:
     """
     Run both prompts against all test inputs and return the worst divergence seen.
+
+    Features:
+    - Per-input timeout (120s): records worst-case divergence (1.0) on timeout
+    - Early termination: if first 2 inputs both show catastrophic divergence
+      (> threshold * 2), stops early and returns worst score
     """
     worst = 0.0
+    early_failures = 0
+
     for i, user_input in enumerate(test_inputs):
-        original_output  = await generate(user_input, system_prompt=original_prompt,  session=session)
-        compressed_output = await generate(user_input, system_prompt=compressed_prompt, session=session)
-        divs = await compute_divergences(original_output, [compressed_output], mode=mode, session=session)
-        worst = max(worst, divs[0])
+        try:
+            async with asyncio.timeout(120.0):
+                original_output = await generate(user_input, system_prompt=original_prompt, session=session)
+                compressed_output = await generate(user_input, system_prompt=compressed_prompt, session=session)
+                divs = await compute_divergences(original_output, [compressed_output], mode=mode, session=session)
+                divergence = divs[0]
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"Validation timeout on input {i + 1}/{len(test_inputs)}, recording worst-case divergence"
+            )
+            divergence = 1.0
+
+        worst = max(worst, divergence)
+
         if on_progress:
             on_progress(i + 1, len(test_inputs))
+
+        # Early termination on catastrophic divergence
+        if i < 2 and divergence > threshold * 2:
+            early_failures += 1
+        if early_failures >= 2 and i == 1:
+            logger.info(
+                f"Early termination: first 2 inputs show catastrophic divergence ({worst:.3f})"
+            )
+            return worst
+
     return worst

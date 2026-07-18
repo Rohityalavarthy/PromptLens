@@ -21,6 +21,7 @@ class SimilarityMode(Enum):
 class Region:
     type: RegionType
     text: str
+    start_offset: int = 0
 
 
 @dataclass
@@ -30,6 +31,9 @@ class Phrase:
     atomic: bool = False
     region_type: RegionType = RegionType.PLAIN
     tag_name: Optional[str] = None       # for XML phrases — used during reconstruction
+    char_start: int = -1                 # start offset in original prompt (inclusive)
+    char_end: int = -1                   # end offset in original prompt (exclusive)
+    source_text: str = ""                # exact slice of original prompt[char_start:char_end]
 
 
 @dataclass
